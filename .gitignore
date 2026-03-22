@@ -45,9 +45,16 @@ logs/
 **/scanner_results.mmap.lock
 **/symbols_idx_map.json
 
-# Logs
+# Logs & local lockfiles
 *.log
-**/scanner_engine.log
+*.log.*
+**/scanner_engine.log*
+**/*.lock
+scanner_state.lock
+
+# Reflex / Bun local install (not source)
+stock_scanner_sovereign/.local/
+**/.local/share/reflex/
 
 # IDE
 .idea/
