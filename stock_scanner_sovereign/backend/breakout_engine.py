@@ -74,15 +74,36 @@ class BreakoutScanner:
                         d["brk_lvl"] = m[d["symbol"]]
         except Exception:
             pass
-        sq, st = kw.get("search", "").upper(), kw.get("status", "ALL")
-        if sq: data = [d for d in data if sq in d['symbol'].split(":")[-1]]
+        sq = (kw.get("search") or "").upper()
+        # BRK STAGE column uses raw `status` (BREAKOUT, NEAR BRK, STAGE 2, …) before format_ui_row
+        st = (kw.get("brk_stage") or kw.get("status") or "ALL").strip().upper()
+        if sq:
+            data = [d for d in data if sq in d["symbol"].split(":")[-1].upper()]
         import logging
         logger = logging.getLogger("BreakoutEngine")
-        if st != "ALL": 
-            logger.info(f"🔍 [Breakout] Calculating signals for {len(data)} filtered symbols...")
-            data = [d for d in data if d.get('status') == st or (st == "BREAKOUT" and d.get('is_breakout'))]
+        if st != "ALL":
+            logger.info(f"🔍 [Breakout] BRK_STAGE={st} filter on {len(data)} symbols...")
+            data = [
+                d
+                for d in data
+                if (d.get("status") == st or (st == "BREAKOUT" and d.get("is_breakout")))
+            ]
         data = [format_ui_row(d) for d in data]
-        data = sorted(data, key=lambda x: (bool(x.get("is_breakout")), x.get("symbol")), reverse=True)
+        sort_key = (kw.get("sort_key") or "").strip().lower()
+        sort_desc = bool(kw.get("sort_desc", False))
+        if sort_key == "mrs":
+            data.sort(key=lambda x: float(x.get("mrs", 0) or 0), reverse=sort_desc)
+        elif sort_key == "udai":
+            data.sort(
+                key=lambda x: str(x.get("udai_ui", "") or "").lower(),
+                reverse=sort_desc,
+            )
+        else:
+            data = sorted(
+                data,
+                key=lambda x: (bool(x.get("is_breakout")), str(x.get("symbol", ""))),
+                reverse=True,
+            )
         p, ps = kw.get("page", 1), kw.get("page_size", 50)
         return {"results": data[(p-1)*ps : p*ps], "total_count": len(data)}
 

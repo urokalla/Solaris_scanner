@@ -5,10 +5,12 @@ async def poll_sidecar_handler(self):
         await asyncio.sleep(1.2)
         async with self:
             view = get_breakout_scanner(universe=self.universe).get_ui_view(
-                page=self.current_page, search=self.search_query,
-                status=self.filter_status, trend=self.filter_trend,
-                rv=self.filter_rv, min_p=float(self.filter_min_price or 0), 
-                max_p=float(self.filter_max_price or 1000000)
+                page=self.current_page,
+                page_size=self.page_size,
+                search=self.search_query,
+                brk_stage=self.filter_brk_stage,
+                sort_key=self.sort_sidecar_key,
+                sort_desc=self.sort_sidecar_desc,
             )
             self.results = view.get("results", [])
             self.total_count = view.get("total_count", 0)

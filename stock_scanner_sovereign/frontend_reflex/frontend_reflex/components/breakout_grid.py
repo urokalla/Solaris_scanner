@@ -1,12 +1,159 @@
 import reflex as rx
 from ..breakout_state import BreakoutState
+
+
 def breakout_alpha_feed():
-    return rx.box(rx.hstack(rx.cond(BreakoutState.alpha_breakouts.length() == 0, rx.text("WAITING FOR BREAKOUT SIGNALS...", color="#333333", font_size="12px", padding="20px"),
-    rx.foreach(BreakoutState.alpha_breakouts, lambda r: rx.box(rx.vstack(rx.hstack(rx.text(r["symbol"], font_weight="bold", color="#FFB000", font_size="14px"), rx.spacer(), rx.badge("🔥 BREAKOUT", color_scheme="green", variant="solid", font_size="10px")),
-    rx.hstack(rx.text(r["ltp"], font_size="18px", font_weight="bold", color="#00FF00"), rx.spacer(), rx.vstack(rx.text(f"LIMIT {r['brk_lvl']}", font_size="11px", color="white"), rx.text(f"STOP {r['stop_price']}", font_size="11px", color="#FF3131"), spacing="0", align_items="end")), spacing="2", align_items="stretch"),
-    padding="12px", border="1px solid #333333", background_color="#111111", border_radius="4px", min_width="220px", flex="1", box_shadow="0 4px 6px rgba(0,0,0,0.3)"))), spacing="4", width="100%", overflow_x="auto", padding="15px"), width="100%", border_bottom="1px solid #333333", background_color="#000000")
+    return rx.box(
+        rx.hstack(
+            rx.cond(
+                BreakoutState.alpha_breakouts.length() == 0,
+                rx.text(
+                    "WAITING FOR BREAKOUT SIGNALS...",
+                    color="#333333",
+                    font_size="12px",
+                    padding="20px",
+                ),
+                rx.foreach(
+                    BreakoutState.alpha_breakouts,
+                    lambda r: rx.box(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.text(r["symbol"], font_weight="bold", color="#FFB000", font_size="14px"),
+                                rx.spacer(),
+                                rx.badge("🔥 BREAKOUT", color_scheme="green", variant="solid", font_size="10px"),
+                            ),
+                            rx.hstack(
+                                rx.text(r["ltp"], font_size="18px", font_weight="bold", color="#00FF00"),
+                                rx.spacer(),
+                                rx.vstack(
+                                    rx.text(f"LIMIT {r['brk_lvl']}", font_size="11px", color="white"),
+                                    rx.text(f"STOP {r['stop_price']}", font_size="11px", color="#FF3131"),
+                                    spacing="0",
+                                    align_items="end",
+                                ),
+                            ),
+                            spacing="2",
+                            align_items="stretch",
+                        ),
+                        padding="12px",
+                        border="1px solid #333333",
+                        background_color="#111111",
+                        border_radius="4px",
+                        min_width="220px",
+                        flex="1",
+                        box_shadow="0 4px 6px rgba(0,0,0,0.3)",
+                    ),
+                ),
+            ),
+            spacing="4",
+            width="100%",
+            overflow_x="auto",
+            padding="15px",
+        ),
+        width="100%",
+        border_bottom="1px solid #333333",
+        background_color="#000000",
+    )
+
 
 def breakout_data_grid():
-    return rx.vstack(rx.table.root(rx.table.header(rx.table.row(rx.table.column_header_cell("SIDECAR", color="white"), rx.table.column_header_cell("PRICE", color="white"), rx.table.column_header_cell("CHG%", color="white"), rx.table.column_header_cell("BRK_LVL", color="white"), rx.table.column_header_cell("TREND", color="white"), rx.table.column_header_cell("mRS (W)", color="white"), rx.table.column_header_cell("MRS STATUS", color="white"), rx.table.column_header_cell("UDAI", color="white"), rx.table.column_header_cell("BRK STAGE", color="white")), background_color="#000080"),
-    rx.table.body(rx.foreach(BreakoutState.paginated_results, lambda r: rx.table.row(rx.table.cell(r["symbol"], color="#FFB000", font_weight="bold", font_size="12px", padding_y="0"), rx.table.cell(r["ltp"], color="#00FF00", font_size="12px", padding_y="0"), rx.table.cell(rx.text(r["chp"], color=r["chp_color"]), font_size="12px", padding_y="0"), rx.table.cell(r["brk_lvl"], color="#D1D1D1", font_size="12px", padding_y="0"), rx.table.cell(rx.text(r["trend_text"], color=r["trend_color"]), font_size="12px", padding_y="0"), rx.table.cell(rx.text(r["mrs_weekly"], color=r["mrs_color"]), font_size="12px", padding_y="0"), rx.table.cell(rx.text(r.get("mrs_grid_status", "—"), color=r.get("mrs_grid_status_color", "#D1D1D1")), font_size="11px", padding_y="0"), rx.table.cell(rx.text(r.get("udai_ui", "—"), color="#D1D1D1"), font_size="11px", padding_y="0"), rx.table.cell(rx.text(r["status"], color=rx.cond(r["is_breakout"], "#00FF00", "#FFB000")), font_size="12px", padding_y="0"), height="25px", padding="0", border_bottom="1px solid #111111"))), width="100%", variant="surface"),
-    rx.hstack(rx.button("PREV", on_click=BreakoutState.prev_page, size="1", variant="outline", color_scheme="gray", disabled=BreakoutState.current_page == 1), rx.text(f"PAGE {BreakoutState.current_page} / {BreakoutState.total_pages}", size="1", color="#D1D1D1"), rx.button("NEXT", on_click=BreakoutState.next_page, size="1", variant="outline", color_scheme="gray", disabled=BreakoutState.current_page == BreakoutState.total_pages), spacing="4", padding="10px", width="100%", justify_content="center", border_top="1px solid #333333"), width="100%", height="100%", overflow_y="auto", padding="0", spacing="0")
+    header_row = rx.table.row(
+        rx.table.column_header_cell("SIDECAR", color="white"),
+        rx.table.column_header_cell("PRICE", color="white"),
+        rx.table.column_header_cell("CHG%", color="white"),
+        rx.table.column_header_cell("BRK_LVL", color="white"),
+        rx.table.column_header_cell("TREND", color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("mRS (W)", color="white"),
+                rx.text(BreakoutState.mrs_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_mrs,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell("MRS STATUS", color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("UDAI", color="white"),
+                rx.text(BreakoutState.udai_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_udai,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell("BRK STAGE", color="white"),
+    )
+    body = rx.table.body(
+        rx.foreach(
+            BreakoutState.paginated_results,
+            lambda r: rx.table.row(
+                rx.table.cell(r["symbol"], color="#FFB000", font_weight="bold", font_size="12px", padding_y="0"),
+                rx.table.cell(r["ltp"], color="#00FF00", font_size="12px", padding_y="0"),
+                rx.table.cell(rx.text(r["chp"], color=r["chp_color"]), font_size="12px", padding_y="0"),
+                rx.table.cell(r["brk_lvl"], color="#D1D1D1", font_size="12px", padding_y="0"),
+                rx.table.cell(rx.text(r["trend_text"], color=r["trend_color"]), font_size="12px", padding_y="0"),
+                rx.table.cell(rx.text(r["mrs_weekly"], color=r["mrs_color"]), font_size="12px", padding_y="0"),
+                rx.table.cell(
+                    rx.text(r.get("mrs_grid_status", "—"), color=r.get("mrs_grid_status_color", "#D1D1D1")),
+                    font_size="11px",
+                    padding_y="0",
+                ),
+                rx.table.cell(rx.text(r.get("udai_ui", "—"), color="#D1D1D1"), font_size="11px", padding_y="0"),
+                rx.table.cell(
+                    rx.text(r["status"], color=rx.cond(r["is_breakout"], "#00FF00", "#FFB000")),
+                    font_size="12px",
+                    padding_y="0",
+                ),
+                height="25px",
+                padding="0",
+                border_bottom="1px solid #111111",
+            ),
+        ),
+    )
+    return rx.vstack(
+        rx.table.root(
+            rx.table.header(header_row),
+            body,
+            width="100%",
+            variant="surface",
+            background_color="#000080",
+        ),
+        rx.hstack(
+            rx.button(
+                "PREV",
+                on_click=BreakoutState.prev_page,
+                size="1",
+                variant="outline",
+                color_scheme="gray",
+                disabled=BreakoutState.current_page == 1,
+            ),
+            rx.text(
+                f"PAGE {BreakoutState.current_page} / {BreakoutState.total_pages}",
+                size="1",
+                color="#D1D1D1",
+            ),
+            rx.button(
+                "NEXT",
+                on_click=BreakoutState.next_page,
+                size="1",
+                variant="outline",
+                color_scheme="gray",
+                disabled=BreakoutState.current_page == BreakoutState.total_pages,
+            ),
+            spacing="4",
+            padding="10px",
+            width="100%",
+            justify_content="center",
+            border_top="1px solid #333333",
+        ),
+        width="100%",
+        height="100%",
+        overflow_y="auto",
+        padding="0",
+        spacing="0",
+    )
