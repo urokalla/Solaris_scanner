@@ -1,0 +1,15 @@
+[Unit]
+Description=Solaris Stock Scanner Engine
+After=network.target
+
+[Service]
+User=udai
+WorkingDirectory=/home/udai/RS_PROJECT/stock_scanner_sovereign
+Environment=PYTHONPATH=.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 backend/scanner.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

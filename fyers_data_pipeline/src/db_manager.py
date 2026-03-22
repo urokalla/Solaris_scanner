@@ -1,0 +1,92 @@
+import os
+import logging
+from sqlalchemy import create_engine, MetaData, Table, Column, String, TIMESTAMP, Boolean, ForeignKey
+from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+class DatabaseManager:
+    """
+    Handles connections and operations with PostgreSQL.
+    """
+    def __init__(self, config_path: str = None):
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        load_dotenv(config_path or os.path.join(project_root, 'config/.env'))
+        
+        # Prioritize components for Docker flexibility (since DB_HOST=db is often set)
+        user = os.getenv('DB_USER')
+        password = os.getenv('DB_PASSWORD')
+        host = os.getenv('DB_HOST', 'localhost')
+        port = os.getenv('DB_PORT', '5432')
+        name = os.getenv('DB_NAME')
+        
+        # Only use DATABASE_URL if explicitly provided and components are missing
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url or ("localhost" in db_url and host != "localhost"):
+            db_url = f"postgresql://{user}:{password}@{host}:{port}/{name}"
+        
+        self.engine = create_engine(db_url)
+        self.Session = sessionmaker(bind=self.engine)
+        self.metadata = MetaData()
+
+    def initialize_schema(self):
+        """Standard Sovereign Schema: Ensures all layers have their target tables."""
+        from sqlalchemy import Column, String, Float, Integer, Date, TIMESTAMP, Boolean, ForeignKey, UniqueConstraint
+
+        # Layer 1: Core Identification
+        symbols = Table('symbols', self.metadata,
+            Column('symbol_id', String, primary_key=True),
+            Column('symbol_token', String),
+            Column('description', String),
+            Column('exchange', String),
+            Column('is_active', Boolean, default=True)
+        )
+        
+        # Layer 2: Historical OHLCV (The missing 'prices' table)
+        prices = Table('prices', self.metadata,
+            Column('symbol', String, primary_key=True),
+            Column('timestamp', TIMESTAMP, primary_key=True),
+            Column('timeframe', String, primary_key=True),
+            Column('open', Float),
+            Column('high', Float),
+            Column('low', Float),
+            Column('close', Float),
+            Column('volume', Float)
+        )
+        
+        # Layer 3: Persistence/Dashboard (live_state)
+        live_state = Table('live_state', self.metadata,
+            Column('symbol', String, primary_key=True),
+            Column('last_price', Float),
+            Column('mrs', Float),
+            Column('rs_rating', Integer),
+            Column('status', String),
+            Column('brk_lvl', Float),
+            Column('mrs_prev_day', Float),
+        )
+        
+        # Layer 4: Analytics (rs_ratings)
+        rs_ratings = Table('rs_ratings', self.metadata,
+            Column('symbol', String, primary_key=True),
+            Column('date', Date, primary_key=True),
+            Column('rs_rating', Integer),
+            Column('mrs', Float)
+        )
+
+        # Helper: Universes
+        universes = Table('universes', self.metadata,
+            Column('universe_id', String, primary_key=True),
+            Column('universe_name', String)
+        )
+        universe_members = Table('universe_members', self.metadata,
+            Column('universe_id', String, ForeignKey('universes.universe_id'), primary_key=True),
+            Column('symbol_id', String, ForeignKey('symbols.symbol_id'), primary_key=True)
+        )
+        
+        try:
+            self.metadata.create_all(self.engine)
+            logger.info("📡 [DB] All Architecture-Blueprint tables initialized successfully.")
+        except Exception as e:
+            logger.error(f"❌ [DB] Schema initialization failed: {e}")
+            raise

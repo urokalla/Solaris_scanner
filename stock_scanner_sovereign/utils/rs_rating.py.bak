@@ -1,0 +1,139 @@
+import os, json, time, threading, pandas as pd, numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from .pipeline_bridge import PipelineBridge
+from .constants import BENCHMARK_MAP, SYMBOL_GROUPS
+from .symbols import get_nifty_symbols
+D_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
+C_DIR, _g_cache, _l = os.path.join(D_DIR, "data/cache"), {}, threading.RLock()
+def _load_s(idx="Nifty 500"):
+    syms = get_nifty_symbols(idx)
+    # Return raw symbols but preserve the original format for mapping
+    return syms
+def compute_rs_ratings(idx="Nifty 500", p_data=None):
+    global _g_cache
+    with _l:
+        if not p_data and idx in _g_cache: return _g_cache[idx]
+    
+    os.makedirs(C_DIR, exist_ok=True)
+    c_f = os.path.join(C_DIR, f"rs_rating_{idx.lower().replace(' ', '_')}.json")
+    
+    # If not providing new data, try to load from disk cache first
+    if not p_data and os.path.exists(c_f) and (time.time() - os.path.getmtime(c_f)) < 86400:
+        try:
+            with open(c_f) as f: 
+                res = json.load(f)
+                with _l: _g_cache[idx] = res
+                return res
+        except Exception: pass
+
+    syms, all_d = _load_s(idx), {}
+    if p_data: 
+        # High Performance: Avoid deep copies and renames if possible
+        # Optimized for speed in large universes (500+ symbols)
+        all_d = p_data
+        print(f"📊 [RS Rating] Processing snapshots for {len(all_d)} symbols")
+    else:
+        bridge = PipelineBridge(); f_s = list(set([f"NSE:{s}-EQ" if "-INDEX" not in s else s for s in syms] + [BENCHMARK_MAP.get(idx, "NSE:NIFTY50-INDEX")]))
+        def _j(s):
+            df = bridge.get_historical_data(s, limit=255)
+            # Standardized columns from bridge
+            return (s, df) if not df.empty else (s, None)
+        with ThreadPoolExecutor(20) as ex: all_d = {s: d for s, d in ex.map(_j, f_s) if d is not None}
+
+    # Internal Calc Column Mapping: Handle lowercase from transition bridge
+    b_f = BENCHMARK_MAP.get(idx, "NSE:NIFTY50-INDEX")
+    b_df = all_d.get(b_f, all_d.get(b_f.replace("NSE:", ""), None))
+    
+    if b_df is None:
+        print(f"⚠️ [RS Rating] Benchmark {b_f} not found in dataset.")
+        return {}
+        
+    b_c = b_df.values[:, 4] if isinstance(b_df, np.ndarray) else b_df['close'].values
+    print(f"📈 [RS Rating] Using benchmark {b_f} with {len(b_c)} rows")
+    
+    # Prepare data for vectorization
+    valid_data = []
+    for s in syms:
+        d = all_d.get(s)
+        if d is not None:
+            c = d.values[:, 4] if isinstance(d, np.ndarray) else d['close'].values
+            if len(c) >= 50:
+                valid_data.append((s, c))
+            
+    if not valid_data: return {}
+
+    # Senior Data Engineer Pattern: Pure Numpy Vectorization
+    sym_list = []
+    scores = []
+    mrs_values = []
+    
+    # Pre-calculate benchmark mean for mRS
+    b_val_50 = b_c[-50:]
+    b_mean_50 = b_val_50.mean()
+    b_last_50 = b_val_50[-1]
+
+    for s, c in valid_data:
+        c_len = len(c)
+        def get_ret_nv(n):
+            return ((c[-1] / c[-n]) - 1) * 100 if c_len >= n else 0.0
+        
+        score = (0.4 * get_ret_nv(63)) + (0.2 * get_ret_nv(126)) + (0.2 * get_ret_nv(189)) + (0.2 * get_ret_nv(252))
+        
+        mrs = 0.0
+        if c_len >= 50:
+            s_val_50 = c[-50:]
+            mrs = round(float(((s_val_50[-1] / b_last_50) / (s_val_50.mean() / b_mean_50) - 1) * 10), 2)
+            
+        sym_list.append(s)
+        scores.append(score)
+        mrs_values.append(mrs)
+
+    if not scores: return {}
+    
+    # Pure Numpy Percentile Rank
+    scores = np.array(scores)
+    # argsort(argsort) gives the rank (0 to N-1)
+    ranks = np.argsort(np.argsort(scores)) + 1
+    # Percentile: (rank / total) * 99
+    perc_ratings = (ranks / len(ranks) * 99).round().astype(int)
+    perc_ratings = np.clip(perc_ratings, 1, 99)
+    
+    res = {sym_list[i]: {"rs_rating": int(perc_ratings[i]), "mrs": mrs_values[i]} for i in range(len(sym_list))}
+    print(f"✅ [RS Rating] Zero-Pandas Vector Pass: Computed {len(res)} ratings.")
+    
+    # Save cache (resilient to permission errors)
+    try:
+        os.makedirs(C_DIR, exist_ok=True)
+        with open(c_f, 'w') as f: json.dump(res, f)
+    except Exception: pass 
+    
+    with _l: _g_cache[idx] = res
+    return res
+
+def get_rs_rating(s, universe="Nifty 500"):
+    global _g_cache
+    # Normalize universe key
+    u_key = str(universe)
+    
+    with _l:
+        cache = _g_cache.get(u_key)
+        if not cache:
+            # Force disk reload for worker processes that don't share memory cache
+            c_f = os.path.join(C_DIR, f"rs_rating_{u_key.lower().replace(' ', '_')}.json")
+            if os.path.exists(c_f):
+                try:
+                    with open(c_f) as f:
+                        cache = json.load(f)
+                        _g_cache[u_key] = cache
+                except Exception: pass
+        
+        if not cache: return 0
+
+    # Robust Matching: Try full symbol, then variants
+    s_full = str(s).upper()
+    e = cache.get(s_full)
+    if not e:
+        s_raw = s_full.replace("NSE:", "").replace("-EQ", "").replace("-INDEX", "").strip()
+        e = cache.get(s_raw) or cache.get(f"NSE:{s_raw}-EQ") or cache.get(f"NSE:{s_raw}-INDEX") or {}
+    
+    return e.get("rs_rating", 0) if isinstance(e, dict) else (int(e) if e else 0)

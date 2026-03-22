@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Data & Scripts
+data/cache/
+logs/
+*.deb
+*.log
+
+# Git
+.git
+.gitignore
+
+# IDEs
+.vscode/
+.idea/

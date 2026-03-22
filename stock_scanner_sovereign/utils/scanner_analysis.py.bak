@@ -1,0 +1,173 @@
+import numpy as np
+import pandas as pd
+from .rs_rating import get_rs_rating
+
+# Column Indices for Zero-Pandas Logic
+TS_IDX, OPEN_IDX, HIGH_IDX, LOW_IDX, CLOSE_IDX, VOL_IDX = 0, 1, 2, 3, 4, 5
+
+def fast_ema_np(data, span):
+    """Pure Numpy EMA using recursive formula: y[t] = (1-alpha)*y[t-1] + alpha*x[t]."""
+    if len(data) == 0: return np.array([])
+    alpha = 2 / (span + 1)
+    # Use simple iterative loop for stability (Reflex uses standard Python)
+    # For maximum speed, this could be vectorized with cumprod, but stability is key.
+    output = np.zeros_like(data)
+    output[0] = data[0]
+    for i in range(1, len(data)):
+        output[i] = (data[i] * alpha) + (output[i-1] * (1 - alpha))
+    return output
+
+def align_numpy(s_data, b_data):
+    """Aligns two 2D numpy arrays based on the timestamp column (index 0)."""
+    if s_data.size == 0 or b_data.size == 0: return np.array([]), np.array([])
+    
+    # 0. De-duplicate: Ensure exactly one entry per timestamp to prevent shape mismatches
+    def dedupe(arr):
+        ts = arr[:, TS_IDX].astype(np.int64)
+        # np.unique with return_index returns the first occurrence. 
+        # Flip to get the last occurrence (latest tick in that second).
+        _, idx = np.unique(ts[::-1], return_index=True)
+        return arr[np.sort(len(ts) - 1 - idx)]
+
+    s_clean = dedupe(s_data)
+    b_clean = dedupe(b_data)
+    
+    # 1. Standard Intersection for History
+    s_ts = s_clean[:, TS_IDX].astype(np.int64)
+    b_ts = b_clean[:, TS_IDX].astype(np.int64)
+    common_ts = np.intersect1d(s_ts, b_ts)
+    
+    if len(common_ts) == 0:
+        return s_clean[-1:], b_clean[-1:]
+
+    s_sync = s_clean[np.isin(s_ts, common_ts)]
+    b_sync = b_clean[np.isin(b_ts, common_ts)]
+    
+    # 2. Latest Trading Value Force-Include
+    s_last_ts, b_last_ts = s_ts[-1], b_ts[-1]
+    
+    if s_last_ts > b_last_ts and s_last_ts not in common_ts:
+        s_sync = np.vstack([s_sync, s_clean[-1]])
+        b_sync = np.vstack([b_sync, b_clean[-1]])
+    elif b_last_ts > s_last_ts and b_last_ts not in common_ts:
+        s_sync = np.vstack([s_sync, s_clean[-1]])
+        b_sync = np.vstack([b_sync, b_clean[-1]])
+        
+    return s_sync, b_sync
+
+def calculate_signals_np(symbol, s_arr, b_arr, params):
+    """Pure Numpy / Vectorized Signal Engine. Zero Pandas overhead."""
+    try:
+        if s_arr.size == 0 or b_arr.size == 0: return None
+        
+        # 1. Alignment (Numpy searchsorted/intersect1d pattern)
+        s_aligned, b_aligned = align_numpy(s_arr, b_arr)
+        if len(s_aligned) < 20: return None
+        
+        # 2. Variable Extraction
+        closes = s_aligned[:, CLOSE_IDX]
+        highs = s_aligned[:, HIGH_IDX]
+        vols = s_aligned[:, VOL_IDX]
+        b_closes = b_aligned[:, CLOSE_IDX]
+        
+        price = float(closes[-1])
+        ticker_short = symbol.replace("NSE:", "").replace("-EQ", "").replace("-INDEX", "")
+        universe = params.get("universe", "Nifty 500")
+        
+        # 3. Ratio & Mansfield
+        ratio = closes / b_closes
+        chp = round(float((price / closes[-2] - 1) * 100), 2) if len(closes) > 1 else 0.0
+        
+        def get_mrs_np(window_val):
+            actual_window = max(5, min(window_val, len(ratio)))
+            # Rolling mean in pure numpy using stride_tricks or simpler cumsum
+            cumsum = np.cumsum(ratio)
+            ma = (cumsum[actual_window:] - cumsum[:-actual_window]) / actual_window
+            # Pad or just use the slice
+            if len(ma) == 0: return 0.0
+            return round(float((ratio[-1] / ma[-1] - 1) * 100), 2)
+
+        mrs_1m = get_mrs_np(21)
+        mrs_3m = get_mrs_np(63)
+        mrs_1y = get_mrs_np(params.get("ma_length", 252))
+        
+        # 4. Indicators (Zero Pandas EMA)
+        ema_f_50 = fast_ema_np(closes, 50)
+        ema_s_200 = fast_ema_np(closes, 200)
+        
+        p_above_50 = price > ema_f_50[-1] if len(closes) >= 50 else False
+        p_above_200 = price > ema_s_200[-1] if len(closes) >= 200 else False
+        
+        # 5. Signals
+        # Breakout Signal (Numpy max)
+        hh_window = 20
+        hh = np.max(highs[-hh_window-1:-1]) if len(highs) > hh_window else 0
+        brk_sig = (closes[-2] <= hh) and (price > hh) and p_above_50
+        
+        # Buy Signal (mRS Cross)
+        ma_signal = np.mean(ratio[-252:]) if len(ratio) >= 252 else np.mean(ratio)
+        current_mrs = (ratio[-1] / ma_signal - 1) * 100
+        prev_mrs = (ratio[-2] / ma_signal - 1) * 100 if len(ratio) > 1 else 0
+        buy_sig = (prev_mrs <= 0 and current_mrs > 0)
+        
+        # 6. Relative Volume (RVOL)
+        # Compare current volume to average of last 20 periods
+        avg_vol = np.mean(vols[-21:-1]) if len(vols) > 20 else np.mean(vols)
+        rel_vol = round(float(vols[-1] / avg_vol), 2) if avg_vol > 0 else 0.0
+        
+        # 7. RS Rating & Profile
+        rs_rating = get_rs_rating(ticker_short, universe=universe)
+        
+        if rs_rating >= 97 and p_above_50 and p_above_200: profile = "💎 ELITE ALPHA"
+        elif rs_rating >= 90 and p_above_50: profile = "🚀 MARKET LEADER"
+        elif rs_rating >= 90 and not p_above_50: profile = "⚠️ FADING LEAD" 
+        elif rs_rating >= 70 and p_above_50: profile = "📈 RISING"
+        elif not p_above_50: profile = "📉 LAGGARD"
+        else: profile = "⚖️ BASELINE"
+
+        status = "🔥 NEW BUY" if buy_sig else "⚡ BREAKOUT" if brk_sig else "-"
+        
+        return {
+            "symbol": symbol, "ltp": price, "profile": profile, "rs_rating": rs_rating, 
+            "mrs": mrs_1y, "mrs_1m": mrs_1m, "mrs_3m": mrs_3m,
+            "status": status, "rv": rel_vol, "rv_up": rel_vol >= 1.5,
+            "p1d": f"{chp:+.2f}%", "p1w": "0%", "p1m": "0%", "p3m": "0%", 
+            "h52w": float(np.max(highs[-252:])) if len(highs) > 0 else 0.0,
+            "ema_ok": p_above_50, "ema_cross_ok": True, "mrs_val": mrs_1y, "mrs_up": mrs_1y > 0,
+            "change_pct": chp
+        }
+    except Exception as e: 
+        print(f"Numpy Signal Error for {symbol}: {e}")
+        return None
+
+# Keep the original function signatures but use pure numpy under the hood
+# This prevents breaking the rest of the dashboard
+def calculate_signals(symbol, df, bench_df, params):
+    """Bridge for Dashboard compatibility (accepts DF, calls Numpy core)."""
+    # Convert DFs to Numpy once at the entry point
+    def to_np(data_in):
+        if data_in is None: return np.array([], dtype=np.float64).reshape(0, 6)
+        
+        # If it's a DataFrame, extract columns and convert
+        if isinstance(data_in, pd.DataFrame):
+            if data_in.empty: return np.array([], dtype=np.float64).reshape(0, 6)
+            ts_values = pd.to_datetime(data_in['timestamp']).values.astype('datetime64[s]').astype(np.int64)
+            others = data_in[['open', 'high', 'low', 'close', 'volume']].values.astype(np.float64)
+            return np.column_stack([ts_values, others]).astype(np.float64)
+            
+        # If it's already a numpy array, ensure it's float64 and handle object types
+        if isinstance(data_in, np.ndarray):
+            if data_in.size == 0: return data_in.astype(np.float64).reshape(0, 6)
+            if data_in.dtype == object:
+                # Handle potential Timestamp objects in column 0
+                ts = pd.to_datetime(data_in[:, 0]).values.astype('datetime64[s]').astype(np.int64)
+                others = data_in[:, 1:].astype(np.float64)
+                return np.column_stack([ts, others]).astype(np.float64)
+            return data_in.astype(np.float64)
+            
+        return np.array([], dtype=np.float64).reshape(0, 6)
+
+    s_arr = to_np(df)
+    b_arr = to_np(bench_df)
+        
+    return calculate_signals_np(symbol, s_arr, b_arr, params)

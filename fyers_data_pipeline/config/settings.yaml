@@ -1,0 +1,6 @@
+pipeline:
+  log_level: INFO
+  history_years: 5
+  chunk_days: 300
+  storage_type: parquet
+  db_type: postgresql
