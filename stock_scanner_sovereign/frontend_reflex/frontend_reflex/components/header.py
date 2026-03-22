@@ -5,8 +5,8 @@ def terminal_header():
     return rx.vstack(
         rx.hstack(
             rx.vstack(
-                rx.text("SOLARIS • RS SCANNER", size="4", color="#00FF00", font_weight="bold"),
-                rx.text("READY", size="1", color="#D1D1D1"),
+                rx.text("SOLARIS • RS SCANNER", size="4", color="#00FF00", font_weight="bold", letter_spacing="0.02em"),
+                rx.text(State.status_message, size="1", color="#888888", font_size="11px"),
                 align_items="start", spacing="0"
             ),
             rx.spacer(),
@@ -20,7 +20,7 @@ def terminal_header():
                 ),
                 align_items="end", spacing="0"
             ),
-            width="100%", padding="10px", border_bottom="1px solid #333333", background_color="#000000"
+            width="100%", padding="12px 14px", border_bottom="1px solid #2a2a2a", background_color="#000000"
         ),
         ticker_tape(), spacing="0", width="100%"
     )

@@ -100,6 +100,20 @@ def test_golden_buy_now_mrs_cross_zero():
     assert r["status"] == "BUY NOW"
 
 
+def test_golden_near_brk_95_percent_band():
+    """Close above 95% of pivot high but not above full pivot — label NEAR BRK (weekly mRS can be < 0)."""
+    wd = get_breakout_window_dict()
+    n = wd["min_intraday_bars_for_breakout"]
+    h = _bars(n, high=100.0, close=99.0)
+    h[-1, 4] = 96.0  # > 95, not > 100
+    params = merge_params_with_windows(
+        {"rs_rating_info": {"mrs": -1.0, "mrs_prev": -1.0, "mrs_signal": 0.0}}
+    )
+    r = calculate_breakout_signals("NSE:TEST-EQ", h, None, params)
+    assert r["status"] == "NEAR BRK"
+    assert r["is_breakout"] is False
+
+
 def test_golden_custom_pivot_window():
     """Narrow pivot window: 10 bars with max high 50; close 60 -> BREAKOUT."""
     wd = get_breakout_window_dict()

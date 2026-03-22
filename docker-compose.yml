@@ -11,6 +11,9 @@ services:
       POSTGRES_DB: fyers_db
     volumes:
       - ./postgres_data:/var/lib/postgresql/data
+    # Host-side scripts (eod_sync, etc.) use DB_HOST=localhost — bind loopback only
+    ports:
+      - "127.0.0.1:5432:5432"
     networks:
       - sovereign_net
     command: ["postgres", "-c", "max_connections=300"]
@@ -39,12 +42,19 @@ services:
       - ./stock_scanner_sovereign/.env
     volumes:
       - ./fyers_data_pipeline:/app
-      - ./stock_scanner_sovereign/data:/app/stock_scanner_sovereign/data
+      - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
       - ./stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
     environment:
       - DB_HOST=db
       - HOME=/app
+      - PYTHONPATH=/app/stock_scanner_sovereign
       - FYERS_ACCESS_TOKEN_PATH=/app/stock_scanner_sovereign/access_token.txt
+      # EOD: append today’s 1D bar after NSE close (Mon–Fri), default first run after 15:45 IST
+      - EOD_SYNC_IST_HOUR=15
+      - EOD_SYNC_IST_MINUTE=45
+      - PIPELINE_DATA_DIR=/app/data/historical
+      - BACKFILL_IST_HOUR=1
+      - BACKFILL_IST_MINUTE=0
     networks:
       - sovereign_net
 
@@ -64,6 +74,8 @@ services:
     volumes:
       - /home/udai/RS_PROJECT/stock_scanner_sovereign:/app/stock_scanner_sovereign
       - /home/udai/RS_PROJECT/fyers_data_pipeline/data/historical:/app/data/historical
+      # So scripts can import fyers_data_pipeline (e.g. backfill_missing_parquet.py)
+      - ./fyers_data_pipeline:/app/fyers_data_pipeline:ro
       - /home/udai/RS_PROJECT/stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
     environment:
       - SHM_MASTER=true
@@ -71,6 +83,7 @@ services:
       - DB_HOST=db
       - FYERS_ACCESS_TOKEN_PATH=/app/stock_scanner_sovereign/access_token.txt
       - HOME=/app/stock_scanner_sovereign
+      - PYTHONPATH=/app/stock_scanner_sovereign
       # Full websocket feed includes vol_traded_today; lite mode has no volume (RVOL stays 0).
       - FYERS_WS_LITEMODE=false
       - PIPELINE_DATA_DIR=/app/data/historical
@@ -100,7 +113,9 @@ services:
       - PYTHONUNBUFFERED=1
       - DB_HOST=db
       - HOME=/app/stock_scanner_sovereign
+      - PYTHONPATH=/app/stock_scanner_sovereign
       - PIPELINE_DATA_DIR=/app/fyers_data_pipeline/data/historical
+      - SIDECAR_UDAI_PINE=${SIDECAR_UDAI_PINE:-1}
     working_dir: /app/stock_scanner_sovereign
     command: ["python3", "sidecar.py"]
     networks:
@@ -132,6 +147,10 @@ services:
       - FYERS_ACCESS_TOKEN_PATH=/app/stock_scanner_sovereign/access_token.txt
       - PYTHONPATH=/app/stock_scanner_sovereign
       - HOME=/app/stock_scanner_sovereign
+      # Must match volume …/historical:/app/data/historical so BreakoutScanner can read daily Parquet
+      - PIPELINE_DATA_DIR=/app/data/historical
+      # Udai Pine column: set SIDECAR_UDAI_PINE=0 in .env to disable
+      - SIDECAR_UDAI_PINE=${SIDECAR_UDAI_PINE:-1}
     networks:
       - sovereign_net
     deploy:

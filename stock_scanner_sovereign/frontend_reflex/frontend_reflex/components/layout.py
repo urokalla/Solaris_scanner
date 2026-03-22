@@ -17,4 +17,13 @@ def sidebar():
     )
 
 def main_content():
-    return rx.vstack(elite_alpha_feed(), data_grid(), loading_marquee(), spacing="0", width="100%", height="100vh", background_color="#000000")
+    return rx.vstack(
+        elite_alpha_feed(),
+        rx.box(data_grid(), flex="1", min_height="0", width="100%", overflow="hidden", display="flex", flex_direction="column"),
+        loading_marquee(),
+        spacing="0",
+        width="100%",
+        flex="1",
+        min_height="0",
+        background_color="#000000",
+    )

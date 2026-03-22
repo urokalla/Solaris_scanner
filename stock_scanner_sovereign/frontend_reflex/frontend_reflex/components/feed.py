@@ -21,10 +21,11 @@ def elite_alpha_feed():
                     ),
                     spacing="2", align_items="stretch"
                 ),
-                padding="12px", border="1px solid #333333", background_color="#111111",
-                border_radius="4px", min_width="220px", flex="1", box_shadow="0 4px 6px rgba(0,0,0,0.3)"
+                padding="10px 12px", border="1px solid #2a2a2a", background_color="#0d0d0d",
+                border_radius="2px", min_width="200px", flex="1", box_shadow="0 2px 8px rgba(0,0,0,0.45)",
+                _hover={"border_color": "#3a3a3a", "background_color": "#121212"},
             )),
-            spacing="4", width="100%", overflow_x="auto", padding="15px"
+            spacing="3", width="100%", overflow_x="auto", padding="10px 12px"
         ),
-        width="100%", border_bottom="1px solid #333333", background_color="#000000"
+        width="100%", border_bottom="1px solid #2a2a2a", background_color="#000000"
     )

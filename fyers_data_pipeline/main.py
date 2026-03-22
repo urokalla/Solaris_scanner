@@ -13,69 +13,101 @@ from src.utils import setup_logging
 
 logger = setup_logging("pipeline_service", "pipeline.log")
 
-def run_script(script_path):
-    """Runs a python script and logs output."""
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _ist_now():
+    now_utc = datetime.now(timezone.utc)
+    return now_utc + timedelta(hours=5, minutes=30)
+
+
+def _state_dir():
+    """Persist scheduler checkpoints next to Parquet data (survives container restarts)."""
+    d = os.getenv("PIPELINE_DATA_DIR", os.path.join(_ROOT, "data", "historical"))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _read_date_flag(name: str) -> str | None:
+    p = os.path.join(_state_dir(), name)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_date_flag(name: str, day: str) -> None:
+    p = os.path.join(_state_dir(), name)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(day)
+
+
+def run_script(rel_path: str):
+    """Runs a python script under this repo (absolute path)."""
+    script_path = os.path.join(_ROOT, rel_path)
     logger.info(f"🚀 Starting script: {script_path}")
     try:
-        # Use the same python interpreter as the service
-        result = subprocess.run([sys.executable, script_path], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, script_path],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+        )
         if result.returncode == 0:
             logger.info(f"✅ Script finished successfully: {script_path}")
+            if result.stdout:
+                logger.info(result.stdout[-4000:])
             return True
-        else:
-            logger.error(f"❌ Script failed: {script_path}\nError: {result.stderr}")
-            return False
+        logger.error(f"❌ Script failed: {script_path}\nstderr: {result.stderr}\nstdout: {result.stdout[-2000:]}")
+        return False
     except Exception as e:
         logger.exception(f"Exception running {script_path}: {e}")
         return False
 
-def is_market_closed():
-    """Simple check to see if it's past market hours (e.g., after 4:00 PM IST)."""
-    # Note: Containers are often UTC, so we should be careful. 
-    # For now, we'll assume the service handles the scheduling loop.
-    now = datetime.now().time()
-    market_close = dt_time(16, 0) # 4:00 PM
-    return now > market_close
 
 def main_loop():
     logger.info("📡 Sovereign Pipeline Service Started")
     conn = ConnectionManager()
-    
-    # 30-YEAR ENGINEER FIX: Track job execution to avoid multiple runs in the same minute
-    last_eod_run = None
-    last_backfill_run = None
-    
+
+    eod_h = int(os.getenv("EOD_SYNC_IST_HOUR", "15"))
+    eod_m = int(os.getenv("EOD_SYNC_IST_MINUTE", "45"))
+    eod_after = dt_time(eod_h, eod_m)
+
+    bf_h = int(os.getenv("BACKFILL_IST_HOUR", "1"))
+    bf_m = int(os.getenv("BACKFILL_IST_MINUTE", "0"))
+
     while True:
         try:
-            # 1. IST Timezone Logic (UTC + 5:30)
-            now_utc = datetime.now(timezone.utc)
-            now_ist = now_utc + timedelta(hours=5, minutes=30)
+            now_ist = _ist_now()
             current_date = now_ist.date()
             current_time = now_ist.time()
-            
-            # 2. JOB 1: Daily EOD Sync (3:45 PM IST)
-            # Fyers EOD candles are usually ready 10-15 mins after market close.
-            if current_time.hour == 15 and current_time.minute == 45:
-                if last_eod_run != current_date:
-                    logger.info("📥 [Scheduler] Triggering Daily EOD Sync (3:45 PM IST)...")
-                    run_script("scripts/eod_sync.py")
-                    last_eod_run = current_date
-            
-            # 3. JOB 2: Deep Backfill (1:00 AM IST)
-            # Ensuring 5-year data integrity once per day during low-load hours.
-            if current_time.hour == 1 and current_time.minute == 0:
-                if last_backfill_run != current_date:
-                    logger.info("🚀 [Scheduler] Triggering Deep Backfill (1:00 AM IST)...")
-                    run_script("scripts/backfill.py")
-                    last_backfill_run = current_date
-            
-            # 4. Maintenance / Token Check
+            today_str = current_date.isoformat()
+
+            # JOB 1: Daily EOD — append today’s 1D bar after NSE close (~15:30 IST); data usually ready by ~15:45 IST
+            # Mon–Fri only; first loop after EOD_SYNC_IST_* where we haven’t succeeded today.
+            if now_ist.weekday() < 5 and current_time >= eod_after:
+                if _read_date_flag(".eod_last_ok_date") != today_str:
+                    logger.info(
+                        f"📥 [Scheduler] Daily EOD sync (IST ≥ {eod_h:02d}:{eod_m:02d}, append today)..."
+                    )
+                    if run_script(os.path.join("scripts", "eod_sync.py")):
+                        _write_date_flag(".eod_last_ok_date", today_str)
+
+            # JOB 2: Deep backfill — narrow IST window (sleep=30s can skip a single minute)
+            if current_time.hour == bf_h and bf_m <= current_time.minute < bf_m + 5:
+                if _read_date_flag(".backfill_last_ok_date") != today_str:
+                    logger.info(f"🚀 [Scheduler] Deep backfill ({bf_h:02d}:{bf_m:02d} IST window)...")
+                    if run_script(os.path.join("scripts", "backfill.py")):
+                        _write_date_flag(".backfill_last_ok_date", today_str)
+
             if not conn.connect():
                 logger.error("🔑 Fyers Token Expired or Missing. Pipeline will retry in 1 minute.")
-            
-            # Sleep 30s to prevent CPU hogging while waiting for the next minute
+
             time.sleep(30)
-            
+
         except KeyboardInterrupt:
             logger.info("🛑 Service stopping...")
             break

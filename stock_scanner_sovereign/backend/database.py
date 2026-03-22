@@ -1,4 +1,6 @@
 import os, psycopg2, numpy as np, logging
+from utils.constants import UNIVERSE_ID_BY_DISPLAY
+
 logger = logging.getLogger(__name__)
 from psycopg2.extras import execute_values
 from psycopg2.pool import ThreadedConnectionPool
@@ -48,18 +50,11 @@ class DatabaseManager:
                 return np.array([[r[0].timestamp() if isinstance(r[0], datetime) else 0.0, r[1], r[2], r[3], r[4], r[5]] for r in res][::-1])
 
     def get_symbols_by_universe(self, universe_id):
-        if not universe_id: universe_id = "Nifty 500"
-        u_map = {
-            "Nifty 50": "NIFTY_50",
-            "Nifty 100": "NIFTY_100",
-            "Nifty 500": "NIFTY_500",
-            "Bank Nifty": "BANK_NIFTY",
-            "All NSE Stocks": "ALL_NSE",
-            "Nifty Smallcap 100": "SMALLCAP_100",
-            "Nifty Midcap 100": "MIDCAP_100",
-            "Microcap 250": "MICROCAP_250"
-        }
-        uid = u_map.get(universe_id, str(universe_id).upper().replace(" ", "_"))
+        if not universe_id:
+            universe_id = "Nifty 500"
+        uid = UNIVERSE_ID_BY_DISPLAY.get(universe_id)
+        if uid is None:
+            uid = str(universe_id).upper().replace(" ", "_")
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT symbol_id FROM universe_members WHERE universe_id = %s", (uid,))

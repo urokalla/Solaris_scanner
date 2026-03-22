@@ -47,7 +47,16 @@ _COL = {
 def data_grid():
     return rx.vstack(
         rx.hstack(
-            rx.input(placeholder="Search Symbol...", on_change=State.set_search_query, size="1", width="150px", border="1px solid #333", bg="#111", color="white"),
+            rx.input(
+                placeholder="Search Symbol…",
+                on_change=State.set_search_query,
+                size="1",
+                width="160px",
+                border="1px solid #2a2a2a",
+                bg="#0d0d0d",
+                color="white",
+                _focus={"border_color": "#FFB000", "box_shadow": "0 0 0 1px rgba(255,176,0,0.25)"},
+            ),
             rx.select(["ALL", "ELITE", "LEADER", "RISING", "LAGGARD", "FADING", "BASELINE"], value=State.filter_profile, on_change=State.set_filter_profile, color="white", bg="#111111", border="1px solid #333", size="1", width="100px"),
             rx.select(["ALL", "BUY", "TRENDING", "NOT TRENDING"], value=State.filter_status, on_change=State.set_filter_status, color="white", bg="#111111", border="1px solid #333", size="1", width="120px"),
             rx.select(["ALL", "1.5", "2.0", "3.0", "5.0"], value=State.filter_rv, on_change=State.set_filter_rv, color="white", bg="#111111", border="1px solid #333", size="1", width="80px"),
@@ -55,7 +64,7 @@ def data_grid():
             width="100%",
             padding="8px 6px",
             align_items="center",
-            border_bottom="1px solid #222",
+            border_bottom="1px solid #2a2a2a",
             spacing="3",
             justify_content="start",
             flex_wrap="wrap",
@@ -75,7 +84,8 @@ def data_grid():
                     rx.table.column_header_cell("PRF", color="white", **_TH, **_COL["prf"]),
                     rx.table.column_header_cell("STATUS", color="white", **_TH, **_COL["status"]),
                 ),
-                background_color="#000080",
+                background_color="#0a0a4a",
+                style={"position": "sticky", "top": 0, "z_index": 4},
             ),
             rx.table.body(
                 rx.foreach(
@@ -176,6 +186,7 @@ def data_grid():
                         padding="0",
                         line_height="1.15",
                         border_bottom="1px solid #111111",
+                        _hover={"background_color": "rgba(255,255,255,0.04)"},
                     ),
                 )
             ),
@@ -194,7 +205,8 @@ def data_grid():
             border_top="1px solid #333333",
         ),
         width="100%",
-        height="100%",
+        flex="1",
+        min_height="0",
         overflow_y="auto",
         padding="0",
         spacing="0",

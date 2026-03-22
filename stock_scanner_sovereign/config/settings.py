@@ -31,4 +31,15 @@ class Settings:
     BREAKOUT_PIVOT_HIGH_WINDOW = int(os.getenv("BREAKOUT_PIVOT_HIGH_WINDOW", "20"))
     BREAKOUT_MIN_INTRADAY_BARS = int(os.getenv("BREAKOUT_MIN_INTRADAY_BARS", "100"))
 
+    # Pine-style daily strategy (sidecar): EMA9/21 + Donchian + ATR trail (see utils/pine_udai_long.py)
+    SIDECAR_UDAI_PINE = os.getenv("SIDECAR_UDAI_PINE", "").strip().lower() in ("1", "true", "yes")
+    UDAI_EMA_FAST = int(os.getenv("UDAI_EMA_FAST", "9"))
+    UDAI_EMA_SLOW = int(os.getenv("UDAI_EMA_SLOW", "21"))
+    UDAI_BREAKOUT_PERIOD = int(os.getenv("UDAI_BREAKOUT_PERIOD", "20"))
+    UDAI_ATR_PERIOD = int(os.getenv("UDAI_ATR_PERIOD", "9"))
+    UDAI_ATR_MULT = float(os.getenv("UDAI_ATR_MULT", "3"))
+    UDAI_RISK_PCT = float(os.getenv("UDAI_RISK_PCT", "1.0"))
+    UDAI_ACCOUNT_EQUITY = float(os.getenv("UDAI_ACCOUNT_EQUITY", "1000000"))
+    UDAI_REFRESH_SEC = float(os.getenv("UDAI_REFRESH_SEC", "60"))
+
 settings = Settings()

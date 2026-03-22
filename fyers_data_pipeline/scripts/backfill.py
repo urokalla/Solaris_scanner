@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import random
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
@@ -17,8 +18,78 @@ from src.utils import setup_logging, get_date_range, chunk_date_range
 
 logger = setup_logging("backfill", "backfill.log")
 
-def backfill_symbol(conn, pq_manager, symbol, years=5, max_retries=10):
+# Fyers throttles hard; space out REST calls and back off when the API says slow down.
+_DEFAULT_REQUEST_GAP_S = 1.25
+_MAX_RATE_LIMIT_BACKOFF_S = 180.0
+
+
+def _normalize_fyers_symbol(sym: str) -> str:
+    """Align universe CSV with Fyers (hyphens in tickers, e.g. BAJAJ_AUTO -> BAJAJ-AUTO)."""
+    s = (sym or "").strip().upper()
+    if not s.startswith("NSE:"):
+        return s
+    body = s[4:]
+    if body.endswith("-EQ") and "_" in body:
+        return "NSE:" + body.replace("_", "-")
+    return s
+
+
+def _is_bad_symbol_history(response: dict) -> bool:
+    """True when the API rejects this ticker — do not retry; move to next symbol."""
+    if not isinstance(response, dict):
+        return False
+    if response.get("s") in ("ok", "no_data"):
+        return False
+    msg = str(response.get("message", "")).lower()
+    needles = (
+        "invalid symbol",
+        "incorrect symbol",
+        "symbol not",
+        "not available",
+        "delist",
+        "no data for symbol",
+        "unknown symbol",
+        "wrong symbol",
+    )
+    return any(n in msg for n in needles)
+
+
+def _is_rate_limited(response: dict) -> bool:
+    """Only real throttling — not -99 / generic errors (saves monthly API quota)."""
+    if not isinstance(response, dict):
+        return False
+    code = response.get("code")
+    if code == -99:
+        return False
+    if code == -300:
+        return True
+    msg = str(response.get("message", "")).lower()
+    phrases = (
+        "rate limit",
+        "too many requests",
+        "throttle",
+        "try again later",
+        "quota exceeded",
+        "request limit",
+    )
+    return any(p in msg for p in phrases)
+
+
+def backfill_symbol(
+    conn,
+    pq_manager,
+    symbol,
+    years=5,
+    max_retries=8,
+    max_rate_limit_retries=5,
+    request_gap_s: float = _DEFAULT_REQUEST_GAP_S,
+):
     """Expert Incremental Logic: Fills gaps in both directions (past to reach 'years', future to catch up)."""
+    raw_sym = symbol
+    symbol = _normalize_fyers_symbol(symbol)
+    if symbol != raw_sym.strip().upper():
+        logger.info("Normalized symbol %r -> %r", raw_sym, symbol)
+
     existing_df = pq_manager.read_data(symbol)
     now = datetime.now()
     target_from, target_to = get_date_range(years)
@@ -52,47 +123,110 @@ def backfill_symbol(conn, pq_manager, symbol, years=5, max_retries=10):
         return True
     
     all_data = []
+    any_chunk_failed = False
+    skip_entire_symbol = False
     for chunk_start, chunk_end in chunks:
+        if skip_entire_symbol:
+            break
         retries = 0
         chunk_success = False
+        rate_limit_streak = 0
+        rate_limit_hits = 0
         while retries < max_retries:
             try:
+                if request_gap_s > 0:
+                    time.sleep(request_gap_s)
                 response = conn.get_history(symbol, chunk_start, chunk_end, resolution="1D")
-                
-                if response.get('s') == 'ok':
-                    candles = response.get('candles', [])
+
+                if response.get("s") == "ok":
+                    candles = response.get("candles", [])
                     if candles:
-                        df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+                        df = pd.DataFrame(
+                            candles,
+                            columns=["timestamp", "open", "high", "low", "close", "volume"],
+                        )
+                        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
                         all_data.append(df)
                     chunk_success = True
-                    break 
-                elif response.get('s') == 'no_data':
+                    break
+                if response.get("s") == "no_data":
                     chunk_success = True
                     break
-                elif response.get('code') == -300 or "limit" in str(response.get('message', '')).lower(): 
-                    wait_time = 15 # Production safety for rate limit recovery
-                    logger.warning(f"⚠️ [Limit] Rate hit for {symbol}. {wait_time}s safeguard...")
+                if _is_bad_symbol_history(response):
+                    logger.warning(
+                        "⏭️ Skipping %s — not on Fyers / bad ticker (%s). Next symbol.",
+                        symbol,
+                        response.get("message"),
+                    )
+                    skip_entire_symbol = True
+                    chunk_success = True
+                    break
+                if _is_rate_limited(response):
+                    rate_limit_hits += 1
+                    if rate_limit_hits > max_rate_limit_retries:
+                        logger.error(
+                            "Stopping %s after %d rate-limit waits (save API quota). "
+                            "Raise --request-gap or run off-peak.",
+                            symbol,
+                            max_rate_limit_retries,
+                        )
+                        break
+                    rate_limit_streak += 1
+                    base = min(
+                        _MAX_RATE_LIMIT_BACKOFF_S,
+                        12.0 * (1.65 ** min(rate_limit_streak - 1, 12)),
+                    )
+                    wait_time = base + random.uniform(0, 1.5)
+                    logger.warning(
+                        "⚠️ [Limit] Rate hit for %s (attempt %d/%d, rl %d/%d). %.1fs backoff...",
+                        symbol,
+                        retries + 1,
+                        max_retries,
+                        rate_limit_hits,
+                        max_rate_limit_retries,
+                        wait_time,
+                    )
                     time.sleep(wait_time)
                 else:
-                    break 
-                    
+                    logger.warning(
+                        "Non-OK history for %s chunk %s–%s: %s",
+                        symbol,
+                        chunk_start,
+                        chunk_end,
+                        response,
+                    )
+                    break
+
                 retries += 1
-            except:
+            except Exception as e:
                 retries += 1
-                time.sleep(2)
+                logger.warning("Exception fetching %s chunk %s: %s", symbol, chunk_start, e)
+                time.sleep(min(30.0, 2.0 * retries))
+        if skip_entire_symbol:
+            break
         if not chunk_success:
-            logger.error(f"Failed to backfill {symbol} chunk starting {chunk_start}. Continuing with other chunks...")
+            any_chunk_failed = True
+            logger.error(
+                "Failed to backfill %s chunk starting %s. Continuing with other chunks...",
+                symbol,
+                chunk_start,
+            )
             continue
 
+    if skip_entire_symbol:
+        return True
+
+    if any_chunk_failed:
+        return False
+
     if all_data:
-        final_df = pd.concat(all_data).drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+        final_df = pd.concat(all_data).drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
         # Use overwrite=False to merge with existing_df in ParquetManager
         pq_manager.save_data(symbol, final_df, overwrite=False)
-        # 0.5-second stagger for rate limit mitigation
+        # Stagger after a full symbol write
         time.sleep(0.5)
         return True
-    return True # Success if we processed chunks, even if no new data was found
+    return True
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -128,9 +262,16 @@ def main():
     
     def process_symbol(symbol):
         try:
-            # We want to be stubborn for stocks but fast for indices
-            retry_count = 1 if ("INDEX" in symbol or "IDX" in symbol) else 10
-            success = backfill_symbol(conn, pq_manager, symbol, years=5, max_retries=retry_count)
+            # One connection + Fyers limits: parallel workers multiply throttle hits; keep low.
+            retry_count = 1 if ("INDEX" in symbol or "IDX" in symbol) else 8
+            success = backfill_symbol(
+                conn,
+                pq_manager,
+                symbol,
+                years=5,
+                max_retries=retry_count,
+                max_rate_limit_retries=5,
+            )
             if success:
                 # Use a new session for each thread to avoid race conditions
                 with db.Session() as session:
@@ -145,8 +286,8 @@ def main():
             logger.error(f"Error on {symbol}: {e}")
             return False
 
-    # High-Performance Parallel Mode (Match original 2-min speed)
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # Fyers REST history is aggressively rate-limited; 5 workers routinely trips limits.
+    with ThreadPoolExecutor(max_workers=2) as executor:
         list(tqdm(executor.map(process_symbol, symbols), total=len(symbols), desc="5-Year Heavy Sync"))
 
 if __name__ == "__main__":

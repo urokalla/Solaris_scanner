@@ -52,6 +52,10 @@ class BreakoutScanner:
             self.buffers = {s: RingBuffer(500, 6) for s in self.all_s}
             self.results = {s: {"symbol": s, "ltp": 0.0, "status": "Waiting..."} for s in self.all_s}
             self.pending, self.last_hb = set(self.symbols), {s: 0.0 for s in self.all_s}
+            # Daily Pine (Udai Long): position/trail state + throttled Parquet cache (see breakout_logic)
+            self.udai_state = {}
+            self.udai_last_fetch = {}
+            self.udai_ohlcv = {}
         threading.Thread(target=initial_sync_helper, args=(self,), daemon=True).start()
 
     def start_scanning(self, **kwargs):

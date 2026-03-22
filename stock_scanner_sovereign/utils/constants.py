@@ -39,18 +39,31 @@ BENCHMARK_MAP = {
     "All NSE Stocks": "NSE:NIFTY500-INDEX"
 }
 
-# Display names that have canonical CSV + DB universe_members rows we validate (same keys as DASHBOARD_BENCHMARK_MAP).
-CANONICAL_MEMBERSHIP_UNIVERSES = tuple(DASHBOARD_BENCHMARK_MAP.keys())
-
 SYMBOL_GROUPS = {
     "Nifty 50": "data/nifty50.csv",
-    "Nifty 100": "data/nifty100.csv", 
+    "Nifty 100": "data/nifty100.csv",
     "Nifty 500": "data/nifty500.csv",
     "Nifty Midcap 100": "data/nifty_midcap100.csv",
     "Nifty Smallcap 100": "data/nifty_smallcap100.csv",
     "Microcap 250": "data/microcap250.csv",
     "Bank Nifty": "data/banknifty.csv",
-    "All NSE Stocks": "data/NSE_EQ.csv"
+    "All NSE Stocks": "data/NSE_EQ.csv",
 }
+
+# Sidebar display name -> Postgres `universes.universe_id` / `universe_members.universe_id`
+# (must match `seed_universes.py` and `DatabaseManager.get_symbols_by_universe`).
+UNIVERSE_ID_BY_DISPLAY = {
+    "Nifty 50": "NIFTY_50",
+    "Nifty 100": "NIFTY_100",
+    "Nifty 500": "NIFTY_500",
+    "Nifty Midcap 100": "MIDCAP_100",
+    "Nifty Smallcap 100": "SMALLCAP_100",
+    "Microcap 250": "MICROCAP_250",
+    "Bank Nifty": "BANK_NIFTY",
+    "All NSE Stocks": "ALL_NSE",
+}
+
+# CSV / DB membership validation (all 8 sidebar universes).
+CANONICAL_MEMBERSHIP_UNIVERSES = tuple(SYMBOL_GROUPS.keys())
 
 UNIVERSE_OPTIONS = list(SYMBOL_GROUPS.keys())

@@ -9,15 +9,26 @@ from .breakout_state import BreakoutState
 def index() -> rx.Component:
     return rx.box(
         rx.hstack(
-            sidebar(), 
-            main_content(), 
-            width="100%", 
-            height="100vh", 
+            sidebar(),
+            rx.box(
+                main_content(),
+                flex="1",
+                min_width="0",
+                min_height="0",
+                height="100vh",
+                display="flex",
+                flex_direction="column",
+            ),
+            width="100%",
+            height="100vh",
             spacing="0",
-            background_color="#000000"
+            align_items="stretch",
+            background_color="#000000",
         ),
         width="100%",
+        min_height="100vh",
         font_family="'JetBrains Mono', monospace",
+        style={"WebkitFontSmoothing": "antialiased"},
     )
 
 app = rx.App(
@@ -32,5 +43,5 @@ app = rx.App(
         "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap",
     ],
 )
-app.add_page(index, title="BLOOMBERG TERMINAL • RS SCANNER", on_load=State.on_load)
+app.add_page(index, title="SOLARIS • RS SCANNER", on_load=State.on_load)
 app.add_page(breakout_page, route="/breakout", title="SIDECAR • BREAKOUT STRATEGY", on_load=BreakoutState.on_load)

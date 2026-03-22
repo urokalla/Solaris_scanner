@@ -102,7 +102,8 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     elif curr > high_prior:
         sig = "BREAKOUT"
     elif curr > high_prior * 0.95:
-        sig = "BUY"
+        # Price inside (95%, 100%] of pivot high — not a trade “buy”; avoid clashing with MRS STATUS BUY
+        sig = "NEAR BRK"
     elif mrs > 0:
         sig = "STAGE 2"
     else:

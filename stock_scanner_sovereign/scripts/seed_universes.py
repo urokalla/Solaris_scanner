@@ -1,4 +1,6 @@
-import os, csv, logging; from backend.database import DatabaseManager; from utils.constants import SYMBOL_GROUPS
+import os, csv, logging
+from backend.database import DatabaseManager
+from utils.constants import SYMBOL_GROUPS, UNIVERSE_ID_BY_DISPLAY
 from psycopg2.extras import execute_values
 L = logging.getLogger("Seeder"); logging.basicConfig(level=20)
 
@@ -12,7 +14,17 @@ def seed_universes():
             if not os.path.exists(p): continue
             try:
                 if p.endswith(".txt"):
-                    with open(p) as f: sn = [l.strip().upper() for l in f if l.strip()]
+                    with open(p) as f:
+                        sn = []
+                        for line in f:
+                            s = line.strip().upper()
+                            if not s:
+                                continue
+                            sn.append(
+                                s
+                                if s.startswith("NSE:")
+                                else (f"NSE:{s}" if "INDEX" in s else f"NSE:{s}-EQ")
+                            )
                 else:
                     with open(p, encoding='utf-8-sig') as f:
                         r = csv.DictReader(f); c = next((h for h in r.fieldnames if h.lower()=='symbol'), r.fieldnames[0])
@@ -21,9 +33,14 @@ def seed_universes():
                             v = row.get(c); s = v.strip().upper() if v else ""
                             if s: sn.append(s if s.startswith("NSE:") else (f"NSE:{s}" if "INDEX" in s else f"NSE:{s}-EQ"))
             except Exception as e: L.error(f"Err {p}: {e}"); continue
-            if not sn: continue
-            u_i = u_n.upper().replace(" ", "_").replace("NIFTY_", "").replace("_STOCKS", "").replace("ALL_NSE_STOCKS", "ALL_NSE")
-            L.info(f"Adding {len(sn)} to {u_i}..."); cur.execute("INSERT INTO universes (universe_id) VALUES (%s) ON CONFLICT DO NOTHING", (u_i,))
+            if not sn:
+                continue
+            u_i = UNIVERSE_ID_BY_DISPLAY.get(u_n)
+            if not u_i:
+                L.error("No UNIVERSE_ID_BY_DISPLAY entry for %r — skip.", u_n)
+                continue
+            L.info(f"Adding {len(sn)} to {u_i}...")
+            cur.execute("INSERT INTO universes (universe_id) VALUES (%s) ON CONFLICT DO NOTHING", (u_i,))
             for s in set(sn): cur.execute("INSERT INTO symbols (symbol_id, is_active) VALUES (%s, TRUE) ON CONFLICT DO NOTHING", (s,))
             execute_values(cur, "INSERT INTO universe_members (universe_id, symbol_id) VALUES %s ON CONFLICT DO NOTHING", [(u_i, s) for s in set(sn)])
         conn.commit()

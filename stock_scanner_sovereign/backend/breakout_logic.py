@@ -2,11 +2,31 @@ import time, threading, logging
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
+from config.settings import settings
 from utils.breakout_math import calculate_breakout_signals
 from utils.quant_breakout_config import merge_params_with_windows
+from utils.pine_udai_long import compute_udai_pine
 from utils.signals_math import compute_mrs_signal_line, detect_pivot_high, effective_pivot_window
 
 LGR = logging.getLogger("Breakout")
+
+
+def _decode_shm_grid_status(raw) -> str:
+    """Master SHM `status`: BUY | TRENDING | NOT TRENDING (weekly mRS rules; see docs/quant_rs_accuracy.md)."""
+    if raw is None:
+        return "—"
+    try:
+        if hasattr(raw, "tobytes"):
+            s = raw.tobytes().decode("utf-8", errors="ignore")
+        elif isinstance(raw, (bytes, bytearray)):
+            s = raw.decode("utf-8", errors="ignore")
+        else:
+            s = str(raw)
+    except Exception:
+        return "—"
+    s = s.strip("\x00").strip()
+    return s if s else "—"
+
 
 def initial_sync_helper(self):
     def _fetch(s):
@@ -35,6 +55,10 @@ def main_loop_helper(self):
                         self.results[s]['rv'] = v
                         self.results[s]['mrs'] = float(row['mrs'])
                         self.results[s]['change_pct'] = float(row['change_pct'])
+                        # Main RS grid STATUS (same as dashboard): from master SHM, not breakout STAGE labels
+                        self.results[s]["grid_mrs_status"] = _decode_shm_grid_status(
+                            row["status"] if "status" in row.dtype.names else None
+                        )
         tasks, self.pending = list(self.pending), set()
         b_vw = self.buffers[self.bench_sym].get_ordered_view() if self.bench_sym in self.buffers else None
         for s in tasks:
@@ -84,6 +108,42 @@ def main_loop_helper(self):
                 except Exception as e:
                     LGR.error(f"Error calculating breakout signals for {s}: {e}")
 
+                # Daily Pine (Udai Long): Parquet daily OHLCV + live LTP (feature-flagged)
+                if settings.SIDECAR_UDAI_PINE and s in self.symbols and s != self.bench_sym:
+                    now = time.time()
+                    last = self.udai_last_fetch.get(s, 0.0)
+                    if now - last >= settings.UDAI_REFRESH_SEC or s not in self.udai_ohlcv:
+                        try:
+                            d = self.bridge.get_historical_data(s, limit=400)
+                            if d is None:
+                                d = self.db.get_historical_data(s, "1d", limit=400)
+                            if d is not None and len(d) > 0:
+                                self.udai_ohlcv[s] = d
+                                self.udai_last_fetch[s] = now
+                        except Exception as e:
+                            LGR.error(f"Udai fetch {s}: {e}")
+                    d_hist = self.udai_ohlcv.get(s)
+                    if d_hist is not None:
+                        try:
+                            st = self.udai_state.setdefault(s, {"in_pos": False, "trail": None})
+                            lp = float(self.results[s].get("ltp", 0) or float(row["ltp"]))
+                            u = compute_udai_pine(
+                                d_hist,
+                                lp,
+                                st,
+                                ema_fast=settings.UDAI_EMA_FAST,
+                                ema_slow=settings.UDAI_EMA_SLOW,
+                                breakout_period=settings.UDAI_BREAKOUT_PERIOD,
+                                atr_period=settings.UDAI_ATR_PERIOD,
+                                atr_mult=settings.UDAI_ATR_MULT,
+                                risk_pct=settings.UDAI_RISK_PCT,
+                                account_equity=settings.UDAI_ACCOUNT_EQUITY,
+                            )
+                            self.udai_state[s] = st
+                            self.results[s].update(u)
+                        except Exception as e:
+                            LGR.error(f"Udai Pine {s}: {e}")
+
         # Layer 3 persistence: batch mirror brk_lvl -> live_state (same table master uses for LTP/mRS/status)
         try:
             t = time.time()
@@ -107,6 +167,24 @@ def format_ui_row(d):
     ui_s = s.split(":")[1].split("-")[0] if ":" in s else s
     brk = d.get('brk_lvl')
     brk_disp = f"{float(brk):.2f}" if brk is not None else "—"
+    sp = d.get("stop_price")
+    stop_disp = f"{float(sp):.2f}" if sp is not None else "—"
+    if not settings.SIDECAR_UDAI_PINE:
+        udai_disp = "OFF"
+    else:
+        _u = d.get("udai_ui")
+        udai_disp = str(_u).strip() if _u is not None else ""
+        if not udai_disp:
+            udai_disp = "—"
+    _gs = d.get("grid_mrs_status") or "—"
+    if _gs == "BUY":
+        _gsc = "#00FF00"
+    elif _gs == "TRENDING":
+        _gsc = "#88FFAA"
+    elif _gs == "NOT TRENDING":
+        _gsc = "#FF6666"
+    else:
+        _gsc = "#D1D1D1"
     d.update({
         'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': "#00FF00" if chp >= 0 else "#FF3131",
         'rv': f"{rv:.2f}", 'rv_color': "#00FF00" if rv >= 1.5 else "#D1D1D1",
@@ -115,7 +193,11 @@ def format_ui_row(d):
         'ema_color': "#00FF00" if d.get('trend_up') else "#D1D1D1", 'pc': f"{d.get('prev_close',0.0):.2f}",
         'mrs_weekly': f"{mrs:.2f}",
         'mrs_color': "#00FF00" if mrs > 0 else ("#FF3131" if mrs < 0 else "#D1D1D1"),
+        'mrs_grid_status': _gs,
+        'mrs_grid_status_color': _gsc,
         'brk_lvl': brk_disp,
+        'stop_price': stop_disp,
+        'udai_ui': udai_disp,
         'is_breakout': bool(d.get('is_breakout', False)),
     })
     return d

@@ -6,23 +6,49 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+
+def _running_inside_docker() -> bool:
+    return os.path.isfile("/.dockerenv")
+
+
+def _postgres_host_for_runtime() -> str:
+    """Compose uses DB_HOST=db; that hostname only resolves on the Docker network."""
+    host = os.getenv("DB_HOST", "localhost")
+    if host == "db" and not _running_inside_docker():
+        logger.info(
+            "DB_HOST=db is for Docker Compose; using localhost for host-side Python "
+            "(ensure Postgres port 5432 is published)."
+        )
+        return "localhost"
+    return host
+
+
 class DatabaseManager:
     """
     Handles connections and operations with PostgreSQL.
     """
     def __init__(self, config_path: str = None):
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        load_dotenv(config_path or os.path.join(project_root, 'config/.env'))
-        
-        # Prioritize components for Docker flexibility (since DB_HOST=db is often set)
+        repo_root = os.path.dirname(project_root)
+        load_dotenv(config_path or os.path.join(project_root, "config", ".env"))
+        for extra in (
+            os.path.join(repo_root, "stock_scanner_sovereign", ".env"),
+            os.path.join(repo_root, ".env"),
+        ):
+            if os.path.isfile(extra):
+                load_dotenv(extra, override=True)
+
         user = os.getenv('DB_USER')
         password = os.getenv('DB_PASSWORD')
-        host = os.getenv('DB_HOST', 'localhost')
+        host = _postgres_host_for_runtime()
         port = os.getenv('DB_PORT', '5432')
         name = os.getenv('DB_NAME')
-        
-        # Only use DATABASE_URL if explicitly provided and components are missing
+
         db_url = os.getenv("DATABASE_URL")
+        if db_url and "@db:" in db_url and not _running_inside_docker():
+            db_url = db_url.replace("@db:", "@localhost:")
+            logger.info("Adjusted DATABASE_URL host db -> localhost for host-side runs.")
+
         if not db_url or ("localhost" in db_url and host != "localhost"):
             db_url = f"postgresql://{user}:{password}@{host}:{port}/{name}"
         
