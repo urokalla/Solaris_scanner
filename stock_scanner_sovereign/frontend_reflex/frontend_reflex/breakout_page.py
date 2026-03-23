@@ -12,5 +12,11 @@ def breakout_page():
                 rx.box(rx.text(f"LAST SYNC: {BreakoutState.last_sync} | STATUS: {BreakoutState.status_message}", size="1", color="#00FF00"), width="100%", padding="4px 15px", background_color="#111111", border_top="1px solid #333333"),
                 spacing="0", width="100%", height="100vh", background_color="#000000", overflow="hidden"
             ), width="100%", height="100vh", spacing="0", background_color="#000000", overflow="hidden"
-        ), width="100%", height="100vh", overflow="hidden", font_family="'JetBrains Mono', monospace",
+        ),
+        width="100%",
+        min_height="100vh",
+        background_color="#000000",
+        overflow="hidden",
+        font_family="'JetBrains Mono', monospace",
+        style={"WebkitFontSmoothing": "antialiased"},
     )
