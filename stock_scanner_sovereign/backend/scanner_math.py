@@ -39,6 +39,8 @@ class RSMathEngine:
         self.vol_avg = np.zeros(self.n)
         # Today's cumulative volume (Fyers tick `v`); RVOL = day_vol / vol_avg
         self.day_vol = np.zeros(self.n)
+        # Exchange prior close (from ticks' prev_close_price); used for CHG% when daily matrix [-2] is 0/wrong
+        self.prev_close_day = np.zeros(self.n)
 
     def set_benchmark(self, bench_sym):
         """Sovereign Rebuilding: Updates the baseline target and re-syncs the tracking vectors."""
@@ -185,7 +187,7 @@ class RSMathEngine:
         
         return self.mrs_results, self.mrs_daily, self.rs_ratings
 
-    def update_tick(self, sym, price, session_vol=None):
+    def update_tick(self, sym, price, session_vol=None, prev_close=None):
         """O(1) update of the last slots for real-time recalculation."""
         if sym == self.bench_sym:
             self.bench_prices_w[-1] = price
@@ -195,6 +197,13 @@ class RSMathEngine:
             idx = self.idx_map[sym]
             self.price_matrix_w[idx, -1] = price
             self.price_matrix_d[idx, -1] = price
+            if prev_close is not None:
+                try:
+                    pc = float(prev_close)
+                    if np.isfinite(pc) and pc > 0:
+                        self.prev_close_day[idx] = pc
+                except (TypeError, ValueError):
+                    pass
             if session_vol is not None:
                 try:
                     sv = float(session_vol)

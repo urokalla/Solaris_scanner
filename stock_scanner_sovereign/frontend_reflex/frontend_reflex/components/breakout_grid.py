@@ -51,8 +51,10 @@ def breakout_alpha_feed():
             padding="15px",
         ),
         width="100%",
+        height="96px",
         border_bottom="1px solid #333333",
         background_color="#000000",
+        overflow="hidden",
     )
 
 
@@ -93,7 +95,7 @@ def breakout_data_grid():
             BreakoutState.paginated_results,
             lambda r: rx.table.row(
                 rx.table.cell(r["symbol"], color="#FFB000", font_weight="bold", font_size="12px", padding_y="0"),
-                rx.table.cell(r["ltp"], color="#00FF00", font_size="12px", padding_y="0"),
+                rx.table.cell(r["ltp"], color=r["chp_color"], font_size="12px", padding_y="0"),
                 rx.table.cell(rx.text(r["chp"], color=r["chp_color"]), font_size="12px", padding_y="0"),
                 rx.table.cell(r["brk_lvl"], color="#D1D1D1", font_size="12px", padding_y="0"),
                 rx.table.cell(rx.text(r["trend_text"], color=r["trend_color"]), font_size="12px", padding_y="0"),
@@ -111,7 +113,10 @@ def breakout_data_grid():
                 ),
                 height="25px",
                 padding="0",
-                border_bottom="1px solid #111111",
+                border_bottom="1px solid #1f1f1f",
+                _odd={"background_color": "#050505"},
+                _even={"background_color": "#0b0b0b"},
+                _hover={"background_color": "#151515"},
             ),
         ),
     )
@@ -121,7 +126,7 @@ def breakout_data_grid():
             body,
             width="100%",
             variant="surface",
-            background_color="#000080",
+            background_color="#000000",
         ),
         rx.hstack(
             rx.button(
@@ -152,7 +157,7 @@ def breakout_data_grid():
             border_top="1px solid #333333",
         ),
         width="100%",
-        height="100%",
+        flex="1",
         overflow_y="auto",
         padding="0",
         spacing="0",

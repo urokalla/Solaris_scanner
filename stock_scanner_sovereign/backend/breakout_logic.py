@@ -162,7 +162,15 @@ def main_loop_helper(self):
             LGR.error(f"brk_lvl DB persist: {e}")
 
 def format_ui_row(d):
-    s = d.get('symbol', ''); chp, rv = d.get('change_pct', 0.0), d.get('rv', 0.0)
+    s = d.get('symbol', '')
+    try:
+        chp = float(d.get('change_pct', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        chp = 0.0
+    try:
+        rv = float(d.get('rv', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        rv = 0.0
     mrs = float(d.get('mrs', 0.0))
     ui_s = s.split(":")[1].split("-")[0] if ":" in s else s
     brk = d.get('brk_lvl')
@@ -177,7 +185,7 @@ def format_ui_row(d):
         if not udai_disp:
             udai_disp = "—"
     _gs = d.get("grid_mrs_status") or "—"
-    if _gs == "BUY":
+    if _gs in ("BUY NOW", "BUY"):
         _gsc = "#00FF00"
     elif _gs == "TRENDING":
         _gsc = "#88FFAA"
@@ -185,8 +193,14 @@ def format_ui_row(d):
         _gsc = "#FF6666"
     else:
         _gsc = "#D1D1D1"
+    if chp < 0:
+        chp_color = "#FF3131"
+    elif chp > 0:
+        chp_color = "#00FF00"
+    else:
+        chp_color = "#D1D1D1"
     d.update({
-        'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': "#00FF00" if chp >= 0 else "#FF3131",
+        'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': chp_color,
         'rv': f"{rv:.2f}", 'rv_color': "#00FF00" if rv >= 1.5 else "#D1D1D1",
         'trend_text': "UP" if d.get('trend_up') else "DOWN", 'trend_color': "#00FF00" if d.get('trend_up') else "#FF3131",
         'ema_str': f"{d.get('ema_f_val',0.0):.1f}/{d.get('ema_s_val',0.0):.1f}",

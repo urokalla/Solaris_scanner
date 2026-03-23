@@ -24,7 +24,9 @@ def start_scanning_helper(self):
         threading.Thread(target=self.ws.connect, daemon=True).start()
         time.sleep(5); self._write_health("running")
         if hasattr(self.ws, 'subscribe'):
-            for i in range(0, len(self.symbols), 500):
-                try: self.ws.subscribe(symbols=self.symbols[i:i+500], data_type="symbolData"); time.sleep(1.0)
-                except Exception as e: logger.warning(f"⚠️ [WS] Sub Error: {e}")
+            try:
+                syms = self.symbols[:5000]
+                self.ws.subscribe(symbols=syms, data_type="SymbolUpdate")
+            except Exception as e:
+                logger.warning(f"⚠️ [WS] Sub Error: {e}")
     except Exception as e: logger.error(f"❌ [WS] Init Error: {e}")

@@ -29,7 +29,7 @@ class FyersWebSocket:
         logger.info("Connection opened")
         # Example subscription
         symbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"]
-        self.fs.subscribe(symbols=symbols, data_type="symbolData")
+        self.fs.subscribe(symbols=symbols, data_type="SymbolUpdate")
 
     def on_close(self):
         """Callback for connection close."""

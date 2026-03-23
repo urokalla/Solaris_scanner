@@ -1,4 +1,4 @@
-import time, threading, ssl, os, logging, traceback, json
+import time, threading, ssl, os, logging, traceback, json, re
 from typing import Optional
 import logging.handlers
 import numpy as np
@@ -79,6 +79,7 @@ except AttributeError:
 else:
     ssl._create_default_https_context = _create_unverified_https_context
 
+
 class MasterScanner:
     def __init__(self):
         from utils.constants import BENCHMARK_MAP
@@ -141,15 +142,196 @@ class MasterScanner:
         self.math = RSMathEngine(self.symbols, bench_sym="NSE:NIFTY50-INDEX")
         self.last_flush = 0
         self.ws = None
-        # Master-only: session BUY latch + prior-day mRS cache (dashboard reads SHM written by master)
+        # Master-only: session BUY NOW latch + prior-day mRS cache (dashboard reads SHM written by master)
         self._buy_session_latch: set[str] = set()
         self._last_ist_trading_date = None
         self._mrs_prev_day_cache: dict[str, float] = {}
         self._mrs_prev_day_cache_ts: float = 0.0
         self._eod_snapshot_done_date = None
+        self._last_health_log_ts: float = 0.0
+        self._last_tick_seen_ts: float = 0.0
+        self._last_targeted_resub_ts: float = 0.0
+        self._invalid_ws_symbols_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "fyers_invalid_symbols.json")
+        )
+        self._unresolved_ws_symbols_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "fyers_unresolved_symbols.json")
+        )
+        self._invalid_ws_symbols: set[str] = set()
+        self._load_invalid_ws_symbols()
+
+    def _normalize_ws_symbol(self, s: str) -> str:
+        x = str(s or "").strip().upper()
+        return x if ":" in x else f"NSE:{x}"
+
+    def _load_invalid_ws_symbols(self):
+        try:
+            if not os.path.isfile(self._invalid_ws_symbols_path):
+                self._invalid_ws_symbols = set()
+                return
+            with open(self._invalid_ws_symbols_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            arr = payload if isinstance(payload, list) else payload.get("symbols", [])
+            self._invalid_ws_symbols = {self._normalize_ws_symbol(s) for s in arr if str(s).strip()}
+            if self._invalid_ws_symbols:
+                logger.info("Loaded %s auto-blocked WS symbols.", len(self._invalid_ws_symbols))
+        except Exception as e:
+            logger.warning("Failed loading invalid WS symbols list: %s", e)
+            self._invalid_ws_symbols = set()
+
+    def _save_invalid_ws_symbols(self):
+        try:
+            data = sorted(self._invalid_ws_symbols)
+            with open(self._invalid_ws_symbols_path, "w", encoding="utf-8") as f:
+                json.dump({"symbols": data}, f, ensure_ascii=True, indent=2)
+        except Exception as e:
+            logger.warning("Failed persisting invalid WS symbols list: %s", e)
+
+    def _record_invalid_ws_symbols(self, symbols):
+        try:
+            norm = {self._normalize_ws_symbol(s) for s in (symbols or []) if str(s).strip()}
+            if not norm:
+                return
+            before = len(self._invalid_ws_symbols)
+            self._invalid_ws_symbols.update(norm)
+            if len(self._invalid_ws_symbols) > before:
+                logger.warning(
+                    "Auto-blocking %s new invalid WS symbols (total blocked=%s).",
+                    len(self._invalid_ws_symbols) - before,
+                    len(self._invalid_ws_symbols),
+                )
+                self._save_invalid_ws_symbols()
+        except Exception as e:
+            logger.warning("Failed recording invalid WS symbols: %s", e)
+
+    def _save_unresolved_ws_symbols(self, unresolved, tokens, expected):
+        """Persist unresolved subscribe symbols for manual triage even without explicit invalid_symbols errors."""
+        try:
+            payload = {
+                "timestamp": int(time.time()),
+                "tokens": int(tokens),
+                "expected": int(expected),
+                "missing": int(len(unresolved or [])),
+                "symbols": sorted({self._normalize_ws_symbol(s) for s in (unresolved or []) if str(s).strip()}),
+            }
+            with open(self._unresolved_ws_symbols_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=True, indent=2)
+        except Exception as e:
+            logger.warning("Failed writing unresolved WS symbols file: %s", e)
+
+    def _resolved_symbols_from_token_map(self, m) -> set[str]:
+        """SDK-safe extraction for symbol_token map (supports key/value inverted layouts)."""
+        out = set()
+        if not isinstance(m, dict):
+            return out
+        for k, v in m.items():
+            ks = str(k).upper()
+            vs = str(v).upper()
+            if ":" in ks:
+                out.add(ks)
+            if ":" in vs:
+                out.add(vs)
+        return out
+
+    def _current_ws_target_symbols(self) -> list[str]:
+        self._load_invalid_ws_symbols()
+        blocked = set(self._invalid_ws_symbols)
+        syms = list({self._to_fyers_symbol(f"NSE:{s}-EQ" if ":" not in s else s) for s in self.symbols})
+        return [s for s in syms if str(s).upper() not in blocked]
+
+    def _maybe_resubscribe_unresolved_symbols(self):
+        """
+        Runtime healing: periodically retry unresolved symbols while socket is alive.
+        This avoids waiting for a full restart when a few symbols miss initial mapping.
+        """
+        try:
+            if self.ws is None or not self.ws.is_connected():
+                return
+            now = time.time()
+            interval = float(os.getenv("FYERS_WS_TARGETED_RESUB_SEC", "90"))
+            if (now - self._last_targeted_resub_ts) < interval:
+                return
+            self._last_targeted_resub_ts = now
+
+            target = self._current_ws_target_symbols()
+            expect = len(target)
+            if expect <= 0:
+                return
+            tok_map = getattr(self.ws, "symbol_token", {}) or {}
+            resolved = self._resolved_symbols_from_token_map(tok_map)
+            unresolved = [s for s in target if str(s).upper() not in resolved] if resolved else []
+            self._save_unresolved_ws_symbols(unresolved, len(tok_map), expect)
+            if not unresolved:
+                return
+
+            max_retry = max(20, min(300, int(os.getenv("FYERS_WS_TARGETED_RESUB_MAX", "120"))))
+            batch = max(5, min(40, int(os.getenv("FYERS_WS_TARGETED_RESUB_BATCH", "20"))))
+            retry_syms = unresolved[:max_retry]
+            for i in range(0, len(retry_syms), batch):
+                b = retry_syms[i : i + batch]
+                try:
+                    self.ws.subscribe(symbols=b, data_type=os.getenv("FYERS_WS_DATA_TYPE", "SymbolUpdate"))
+                except Exception:
+                    pass
+                time.sleep(0.20)
+            logger.info(
+                "🎯 [Resub] Retried %s unresolved symbols (tokens=%s/%s)",
+                len(retry_syms), len(tok_map), expect,
+            )
+        except Exception as e:
+            logger.debug("Targeted unresolved resubscribe skipped: %s", e)
+
+    def _log_tick_health(self):
+        """
+        Periodic observability for live subscription quality.
+        Logs token coverage, stale heartbeat count, and unresolved tick mappings.
+        """
+        try:
+            now = time.time()
+            interval = float(os.getenv("SCANNER_HEALTH_LOG_SEC", "10"))
+            if (now - self._last_health_log_ts) < interval:
+                return
+            self._last_health_log_ts = now
+            n = min(len(self.symbols), len(self.shm.arr))
+            if n <= 0:
+                return
+            hb = np.asarray(self.shm.arr["heartbeat"][:n], dtype=np.float64)
+            stale_sec = float(os.getenv("SCANNER_STALE_HEARTBEAT_SEC", "120"))
+            stale_n = int(np.sum((hb <= 0) | ((now - hb) > stale_sec)))
+            tok_n = len(getattr(self.ws, "symbol_token", {}) or {}) if self.ws is not None else 0
+            unresolved = int(getattr(self, "_tick_unresolved", 0))
+            lag = (now - float(self._last_tick_seen_ts)) if self._last_tick_seen_ts > 0 else None
+            logger.info(
+                "📈 [TickHealth] tokens=%s/%s stale>%ss=%s unresolved=%s last_tick_age=%s",
+                tok_n,
+                n,
+                int(stale_sec),
+                stale_n,
+                unresolved,
+                f"{lag:.1f}s" if lag is not None else "never",
+            )
+        except Exception as e:
+            logger.debug("TickHealth log skipped: %s", e)
+
+    def on_ws_error(self, message):
+        """Capture Fyers WS invalid_symbols and persist as auto-exclude list."""
+        try:
+            payload = message
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {"message": payload}
+            if isinstance(payload, dict):
+                invalid = payload.get("invalid_symbols")
+                if isinstance(invalid, list) and invalid:
+                    self._record_invalid_ws_symbols(invalid)
+            logger.error("Fyers WS error: %s", payload)
+        except Exception as e:
+            logger.error("Fyers WS error (unparsed): %s | parse_err=%s", message, e)
 
     def _maybe_roll_new_trading_day_ist(self):
-        """Clear BUY latch on each new calendar day (Asia/Kolkata)."""
+        """Clear BUY NOW latch on each new calendar day (Asia/Kolkata)."""
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
@@ -160,7 +342,7 @@ class MasterScanner:
         if d != self._last_ist_trading_date:
             self._buy_session_latch.clear()
             self._last_ist_trading_date = d
-            logger.info("New IST trading day: cleared BUY session latch")
+            logger.info("New IST trading day: cleared BUY NOW session latch")
 
     def _refresh_mrs_prev_day_cache(self, force: bool = False):
         """Load prior EOD weekly mRS from live_state (throttled unless force)."""
@@ -195,8 +377,8 @@ class MasterScanner:
 
     def _compute_grid_status(self, sym: str, prev_mrs: float, new_mrs: float, mrs_prev_day: Optional[float]) -> bytes:
         """
-        BUY: session-latched after weekly mRS crosses above 0, or first day above 0 vs prior EOD <= 0.
-        Stays BUY until mRS <= 0 or new IST day (latch cleared). TRENDING: mRS > 0 and prior EOD already > 0.
+        BUY NOW: session-latched after weekly mRS crosses above 0, or first day above 0 vs prior EOD <= 0.
+        Stays BUY NOW for the day until mRS <= 0 or new IST day (latch cleared). TRENDING: mRS > 0 and prior EOD already > 0.
         """
         try:
             p, n = float(prev_mrs), float(new_mrs)
@@ -210,16 +392,100 @@ class MasterScanner:
             self._buy_session_latch.discard(sym)
             return b"NOT TRENDING"
         if sym in self._buy_session_latch:
-            return b"BUY"
+            return b"BUY NOW"
         if p <= 0:
             self._buy_session_latch.add(sym)
-            return b"BUY"
+            return b"BUY NOW"
         if mrs_prev_day is not None and mrs_prev_day > 0:
             return b"TRENDING"
         if mrs_prev_day is not None and mrs_prev_day <= 0:
             self._buy_session_latch.add(sym)
-            return b"BUY"
+            return b"BUY NOW"
         return b"TRENDING"
+
+    def _resolve_tick_idx(self, sym) -> Optional[int]:
+        """
+        Map Fyers tick `symbol` to SHM row index. idx_map keys are canonical (e.g. NSE:RELIANCE-EQ).
+        """
+        if not sym:
+            return None
+        idx_map = getattr(self, "sym_to_idx", None) or self.shm.idx_map
+        def _idx(k: str):
+            return idx_map.get(str(k))
+        s = re.sub(r"\s+", "", str(sym).strip())
+        idx = _idx(s)
+        if idx is not None:
+            return idx
+        su = s.upper()
+        if su != s:
+            idx = _idx(su)
+            if idx is not None:
+                return idx
+        if ":" not in s:
+            return None
+        tail = s.split(":", 1)[-1].strip()
+        # EQ: map RELIANCE / BAJAJ-AUTO → NSE:…-EQ (idx_map never uses bare ticker)
+        if tail.endswith("-EQ"):
+            idx = _idx(f"NSE:{tail}")
+            if idx is not None:
+                return idx
+        if tail.endswith("-INDEX"):
+            idx = _idx(f"NSE:{tail}")
+            if idx is not None:
+                return idx
+        if not tail.endswith("-EQ") and "-INDEX" not in tail.upper():
+            idx = _idx(f"NSE:{tail}-EQ")
+            if idx is not None:
+                return idx
+        # Fyers uses '-' in many EQ names; DB can still contain '_' legacy IDs.
+        if tail.endswith("-EQ"):
+            head = tail[:-3]
+            if "-" in head:
+                idx = _idx(f"NSE:{head.replace('-', '_')}-EQ")
+                if idx is not None:
+                    return idx
+        elif tail.endswith("-INDEX"):
+            head = tail[:-6]
+            if "-" in head:
+                idx = _idx(f"NSE:{head.replace('-', '_')}-INDEX")
+                if idx is not None:
+                    return idx
+        # Index alias compatibility (legacy DB IDs vs Fyers feed symbols).
+        _idx_alias_rev = {
+            "NSE:NIFTYMIDCAP100-INDEX": "NSE:MIDCAP100-INDEX",
+            "NSE:NIFTYSMLCAP100-INDEX": "NSE:SMALLCAP100-INDEX",
+        }
+        back = _idx_alias_rev.get(su)
+        if back:
+            idx = _idx(back)
+            if idx is not None:
+                return idx
+        return None
+
+    def _to_fyers_symbol(self, s: str) -> str:
+        """
+        Canonicalize DB/legacy symbols to Fyers WS symbols for subscribe().
+        Keep SHM/internal symbol IDs unchanged; only normalize the outbound WS list.
+        """
+        x = str(s or "").strip().upper()
+        if not x:
+            return x
+        if x.endswith("_INDEX.PARQUET"):
+            # e.g. NSE:NIFTY50_INDEX.PARQUET -> NSE:NIFTY50-INDEX
+            x = x.replace("_INDEX.PARQUET", "-INDEX")
+        if not x.startswith("NSE:"):
+            x = f"NSE:{x}"
+        _idx_alias = {
+            "NSE:MIDCAP100-INDEX": "NSE:NIFTYMIDCAP100-INDEX",
+            "NSE:SMALLCAP100-INDEX": "NSE:NIFTYSMLCAP100-INDEX",
+        }
+        x = _idx_alias.get(x, x)
+        if x.endswith("-EQ"):
+            head = x[4:-3]
+            # Legacy DB symbols like BAJAJ_AUTO/NAM_INDIA must be hyphenated for Fyers.
+            head = head.replace("_", "-")
+            x = f"NSE:{head}-EQ"
+        return x
 
     def start_scanning(self, token=None):
         """Dashboard entry point. Handles Master/Slave bifurcation."""
@@ -268,19 +534,24 @@ class MasterScanner:
             valid_symbols = getattr(self, '_valid_symbols_cache', set(self.symbols))
             
             # Step 3: O(1) Memory Extraction + Dashboard Filtering
+            # Iterate canonical symbol indices only — NOT full shm.arr (10k rows). Scanning all rows
+            # can duplicate tickers (e.g. benchmark mirror slots 9001+ vs primary index row), so one
+            # symbol could appear twice with different LTP/heartbeat and "fixing" one row broke another.
             data = []
             search_val = filters.get("search")
             search_q = str(search_val).upper().strip() if search_val else ""
             status_f = str(filters.get("status", "ALL")).upper()
             profile_f = str(filters.get("profile", "ALL")).upper()
-            
-            for r in self.shm.arr:
-                # 30-Year Rule: Decode with surgical null-stripping
-                sym = r['symbol'].decode('utf-8', errors='ignore').strip('\x00').strip()
-                if not sym or sym not in valid_symbols: continue
+            n_sym = len(self.symbols)
+            for i in range(min(n_sym, len(self.shm.arr))):
+                sym = self.symbols[i]
+                if sym not in valid_symbols:
+                    continue
+                r = self.shm.arr[i]
                 
                 # --- UNIVERSAL SEARCH & DASHBOARD FILTERING ---
-                if search_q and search_q not in sym.upper(): continue
+                if search_q and search_q not in sym.upper():
+                    continue
                 
                 st = r['status'].decode('utf-8', errors='ignore').strip('\x00').strip()
                 if status_f != "ALL":
@@ -296,7 +567,8 @@ class MasterScanner:
                         continue
                 
                 pf = r['profile'].decode('utf-8', errors='ignore').strip('\x00').strip()
-                if profile_f != "ALL" and profile_f not in pf.upper(): continue
+                if profile_f != "ALL" and profile_f not in pf.upper():
+                    continue
                 # ---------------------------------------------
 
                 ch_pct = float(r["change_pct"])
@@ -378,10 +650,14 @@ class MasterScanner:
                     bench_change = f"{b_r['change_pct']:.2f}%"
                     bench_up = bool(float(b_r['change_pct']) >= 0)
             else:
-                # Last Resort: Dynamic Bench Search
+                # Benchmark not in fixed slots (e.g. uncommon index): read primary row
                 b_idx = self.shm.get_idx(bench_sym)
                 if b_idx is not None:
-                    b_r = self.shm.arr[b_idx]; bench_ltp = f"₹{b_r['ltp']:.2f}"
+                    b_r = self.shm.arr[b_idx]
+                    if b_r['ltp'] > 0:
+                        bench_ltp = f"₹{b_r['ltp']:.2f}"
+                        bench_change = f"{float(b_r['change_pct']):.2f}%"
+                        bench_up = bool(float(b_r['change_pct']) >= 0)
 
             logger.info(f"✅ UI Response -> Returning {len(results)} of {len(data)} results.")
             return {
@@ -434,7 +710,10 @@ class MasterScanner:
             for i in range(n):
                 target = self.shm.arr[i]
                 last_price = float(self.math.price_matrix_d[i, -1])
-                prev_price = float(self.math.price_matrix_d[i, -2])
+                pp = float(self.math.price_matrix_d[i, -2])
+                if pp > 0:
+                    self.math.prev_close_day[i] = pp
+                prev_price = float(self.math.prev_close_day[i])
                 
                 if last_price > 0:
                     target['ltp'] = last_price
@@ -491,7 +770,21 @@ class MasterScanner:
             logger.info("📡 [Scanner] Connecting to Fyers WebSocket...")
             # litemode=True only sends ltp + symbol (no volume) — RVOL needs vol_traded_today from full feed.
             _lite = os.getenv("FYERS_WS_LITEMODE", "false").lower() in ("1", "true", "yes")
-            self.ws = data_ws.FyersDataSocket(access_token=token, on_message=self.on_tick, litemode=_lite)
+            # fyers_apiv3 SymbolConversion only maps EQ scrips when data_type is "SymbolUpdate".
+            # Using "symbolData" breaks conversion (silent failure / empty subs).
+            _ws_dtype = os.getenv("FYERS_WS_DATA_TYPE", "SymbolUpdate")
+            try:
+                data_ws.FyersDataSocket._instance = None
+            except Exception:
+                pass
+            self._logged_first_tick = False
+            self._tick_unresolved = 0
+            self.ws = data_ws.FyersDataSocket(
+                access_token=token,
+                on_message=self.on_tick,
+                on_error=self.on_ws_error,
+                litemode=_lite,
+            )
             
             # Explicitly force SSL bypass on the internal socket for V3
             try:
@@ -506,18 +799,156 @@ class MasterScanner:
             # Start connection in a separate thread
             ws_thread = threading.Thread(target=self.ws.connect, daemon=True)
             ws_thread.start()
-            
-            # Subscriptions...
-            formatted_symbols = list(set(f"NSE:{s}-EQ" if ":" not in s else s for s in self.symbols))
-            logger.info(f"Subscribing to {len(formatted_symbols)} symbols...")
-            for i in range(0, len(formatted_symbols), 500):
-                batch = formatted_symbols[i:i+500]
+            _timeout = float(os.getenv("FYERS_WS_CONNECT_TIMEOUT_SEC", "120"))
+            _deadline = time.time() + _timeout
+            while not self.ws.is_connected() and time.time() < _deadline:
+                time.sleep(0.25)
+            if not self.ws.is_connected():
+                raise ConnectionError(
+                    f"Fyers WebSocket not ready after {_timeout:.0f}s; check token, network, or Fyers status."
+                )
+            time.sleep(1.5)
+            formatted_symbols = list(
+                {self._to_fyers_symbol(f"NSE:{s}-EQ" if ":" not in s else s) for s in self.symbols}
+            )
+            # Unified invalid/unwanted symbols source: persisted auto-blocklist file.
+            _ws_exclude = set()
+            self._load_invalid_ws_symbols()
+            _ws_exclude |= set(self._invalid_ws_symbols)
+            formatted_symbols = [s for s in formatted_symbols if str(s).upper() not in _ws_exclude]
+            if len(formatted_symbols) > 5000:
+                logger.warning(
+                    "Capping WebSocket subscription at 5000 symbols (have %s).",
+                    len(formatted_symbols),
+                )
+                formatted_symbols = formatted_symbols[:5000]
+            _batch = max(50, min(500, int(os.getenv("FYERS_WS_SUB_BATCH", "200"))))
+            _sub_sleep = float(os.getenv("FYERS_WS_SUB_BATCH_SLEEP_SEC", "0.80"))
+            logger.info(
+                f"Subscribing to {len(formatted_symbols)} symbols in batches of {_batch} (data_type={_ws_dtype})..."
+            )
+            for i in range(0, len(formatted_symbols), _batch):
+                batch = formatted_symbols[i : i + _batch]
                 try:
-                    self.ws.subscribe(symbols=batch, data_type="symbolData")
-                    time.sleep(1.0)
+                    self.ws.subscribe(symbols=batch, data_type=_ws_dtype)
                 except Exception as e:
-                    logger.error(f"Subscription batch error: {e}")
-            
+                    logger.error("Fyers subscribe batch %s-%s failed: %s", i, i + len(batch), e)
+                    raise ConnectionError(f"Fyers subscribe batch failed: {e}") from e
+                time.sleep(_sub_sleep)
+            tok_map = getattr(self.ws, "symbol_token", {}) or {}
+            _n_tok = len(tok_map)
+            # Defensive replay pass: on unstable sessions, only part of batched subscriptions can stick.
+            # Replay the full list once in smaller batches if initial token coverage is too low.
+            try:
+                expect = len(formatted_symbols)
+                if expect > 0 and _n_tok < int(expect * 0.80):
+                    r_batch = max(50, min(200, int(os.getenv("FYERS_WS_RESUB_BATCH", "150"))))
+                    logger.warning(
+                        "Fyers partial subscribe: %s/%s tokens. Replaying full subscription once...",
+                        _n_tok, expect,
+                    )
+                    for i in range(0, expect, r_batch):
+                        batch = formatted_symbols[i : i + r_batch]
+                        try:
+                            self.ws.subscribe(symbols=batch, data_type=_ws_dtype)
+                        except Exception as ex:
+                            logger.warning("Fyers resubscribe batch %s-%s failed: %s", i, i + len(batch), ex)
+                        time.sleep(_sub_sleep)
+                    tok_map = getattr(self.ws, "symbol_token", {}) or {}
+                    _n_tok = len(tok_map)
+            except Exception:
+                pass
+            # Recovery phase: isolate unresolved symbols in smaller batches so a few invalid symbols
+            # do not suppress a large portion of otherwise valid subscriptions.
+            try:
+                expect = len(formatted_symbols)
+                recover_min = float(os.getenv("FYERS_WS_RECOVER_MIN_RATIO", "0.98"))
+                if expect > 0 and (_n_tok / max(expect, 1)) < recover_min:
+                    def _resolved_symbols_from_token_map(m):
+                        # SDK versions differ: symbol_token can be {symbol: token} OR {token: symbol}.
+                        out = set()
+                        if not isinstance(m, dict):
+                            return out
+                        for k, v in m.items():
+                            ks = str(k).upper()
+                            vs = str(v).upper()
+                            if ":" in ks:
+                                out.add(ks)
+                            if ":" in vs:
+                                out.add(vs)
+                        return out
+
+                    resolved_syms = _resolved_symbols_from_token_map(tok_map)
+                    if not resolved_syms:
+                        logger.warning(
+                            "Skipping recovery pass: could not infer resolved symbols from symbol_token shape (entries=%s).",
+                            _n_tok,
+                        )
+                    pending = [s for s in formatted_symbols if str(s).upper() not in resolved_syms] if resolved_syms else []
+                    if pending and self.ws.is_connected():
+                        r2_batch = max(10, min(50, int(os.getenv("FYERS_WS_RECOVER_BATCH", "25"))))
+                        r2_passes = max(1, min(8, int(os.getenv("FYERS_WS_RECOVER_PASSES", "3"))))
+                        logger.warning(
+                            "Fyers token coverage low (%s/%s). Recovery for %s unresolved symbols (batch=%s passes=%s)...",
+                            _n_tok, expect, len(pending), r2_batch, r2_passes,
+                        )
+                        for p in range(r2_passes):
+                            if not pending or not self.ws.is_connected():
+                                break
+                            for i in range(0, len(pending), r2_batch):
+                                batch = pending[i : i + r2_batch]
+                                try:
+                                    self.ws.subscribe(symbols=batch, data_type=_ws_dtype)
+                                except Exception as ex:
+                                    logger.warning(
+                                        "Fyers recovery pass=%s batch %s-%s failed: %s",
+                                        p + 1, i, i + len(batch), ex,
+                                    )
+                                time.sleep(max(_sub_sleep, 0.35))
+                            tok_map = getattr(self.ws, "symbol_token", {}) or {}
+                            _n_tok = len(tok_map)
+                            resolved_syms = _resolved_symbols_from_token_map(tok_map)
+                            pending = [s for s in formatted_symbols if str(s).upper() not in resolved_syms] if resolved_syms else []
+                            logger.info(
+                                "Fyers recovery progress pass=%s tokens=%s/%s pending=%s",
+                                p + 1, _n_tok, expect, len(pending),
+                            )
+                            # Final stretch: try single-symbol subscribe for stubborn leftovers.
+                            if pending and len(pending) <= 120 and self.ws.is_connected():
+                                for s in list(pending):
+                                    try:
+                                        self.ws.subscribe(symbols=[s], data_type=_ws_dtype)
+                                    except Exception:
+                                        pass
+                                    time.sleep(0.12)
+                                tok_map = getattr(self.ws, "symbol_token", {}) or {}
+                                _n_tok = len(tok_map)
+                                resolved_syms = _resolved_symbols_from_token_map(tok_map)
+                                pending = [s for s in formatted_symbols if str(s).upper() not in resolved_syms] if resolved_syms else []
+                        tok_map = getattr(self.ws, "symbol_token", {}) or {}
+                        _n_tok = len(tok_map)
+                        resolved_syms = _resolved_symbols_from_token_map(tok_map)
+                        unresolved = [s for s in formatted_symbols if str(s).upper() not in resolved_syms] if resolved_syms else []
+                        self._save_unresolved_ws_symbols(unresolved, _n_tok, expect)
+                        if unresolved:
+                            sample = ", ".join(unresolved[:20])
+                            logger.warning(
+                                "Fyers unresolved symbols after recovery: %s (showing up to 20): %s",
+                                len(unresolved), sample,
+                            )
+                    else:
+                        self._save_unresolved_ws_symbols([], _n_tok, expect)
+            except Exception:
+                pass
+            logger.info("Fyers WS symbol_token entries after subscribe: %s", _n_tok)
+            self._log_tick_health()
+            if _n_tok == 0:
+                raise ConnectionError(
+                    "Fyers subscribe produced zero symbol_token entries (symbol conversion failed or silent SDK error). "
+                    "Check token, api-t1.fyers.in from this container, and FYERS_WS_DATA_TYPE=SymbolUpdate."
+                )
+            self.last_flush = time.time()
+
             while True:
                 try:
                     # MASTER PULSE RE-INITIALIZATION: Global Scope Protection
@@ -545,14 +976,20 @@ class MasterScanner:
                                     break
                             
                             if original_idx is not None:
-                                price = float(self.math.price_matrix_d[original_idx, -1])
-                                # If math engine price is 0 (missing parquet), force it to 1.0 
-                                # temporarily to PROVE the link is alive to the USER.
-                                if price == 0: price = 0.0001 
-                                
-                                r['ltp'] = price
+                                # Header / sidebar read benchmark from fixed BENCH_SLOTS (9001+), not from
+                                # the primary index row. Mirror the live row so CHG% matches ticks + on_tick.
+                                src = self.shm.arr[original_idx]
+                                r['ltp'] = float(src['ltp'])
+                                r['change_pct'] = float(src['change_pct'])
+                                r['price_up'] = int(src['price_up'])
+                                r['price_down'] = int(src['price_down'])
+                                r['heartbeat'] = float(src['heartbeat'])
                                 r['symbol'] = b_sym.encode()
-                                r['heartbeat'] = time.time()
+                                if r['ltp'] <= 0:
+                                    price = float(self.math.price_matrix_d[original_idx, -1])
+                                    if price == 0:
+                                        price = 0.0001
+                                    r['ltp'] = price
                     if hasattr(self.shm, 'mm'):
                         # self.shm.mm.flush()
                         pass
@@ -586,10 +1023,16 @@ class MasterScanner:
                                         int(rs_ranks[i]), float(mrs_w[i]), float(mrs_d[i])
                                     )
                                 )
-                                # Target the Daily matrix for the 'Warm LTP' sync
-                                r['ltp'] = float(self.math.price_matrix_d[i, -1])
-                                pp = float(self.math.price_matrix_d[i, -2])
+                                # Never overwrite live LTP from historical matrix during periodic RS flush.
+                                # If no live tick ever arrived for this row, warm it once from matrix.
                                 lp = float(r["ltp"])
+                                if lp <= 0:
+                                    lp = float(self.math.price_matrix_d[i, -1])
+                                    if lp > 0:
+                                        r["ltp"] = lp
+                                pp = float(self.math.prev_close_day[i])
+                                if pp <= 0:
+                                    pp = float(self.math.price_matrix_d[i, -2])
                                 if pp > 0:
                                     ch60 = ((lp - pp) / pp) * 100.0
                                 else:
@@ -611,45 +1054,106 @@ class MasterScanner:
                 except Exception as e:
                     logger.error(f"❌ [Master] Critical Loop Error (Pulse/DB): {e}")
                     import traceback; traceback.print_exc()
+                self._log_tick_health()
+                self._maybe_resubscribe_unresolved_symbols()
                 
                 time.sleep(5)
+        except ConnectionError:
+            raise
         except Exception as e:
             logger.error(f"Error in Scanner start: {e}")
             import traceback; traceback.print_exc()
 
     def on_tick(self, m):
+        """
+        Fyers fires at high frequency; never let mRS/RVOL/profile failures drop LTP + CHG%.
+        """
         try:
-            sym = m.get('symbol')
-            price = m.get('ltp')
+            if not isinstance(m, dict):
+                return
+            sym = m.get("symbol")
+            if isinstance(sym, bytes):
+                sym = sym.decode("utf-8", errors="ignore")
+            price = m.get("ltp")
             vol = _tick_session_volume(m)
-            if not sym or price is None: return
-            
-            # Map symbol to its index in SHM and Math Engine
-            idx = self.shm.get_idx(sym) # Try full name first (Benchmarks)
-            
+            if sym is None or (isinstance(sym, str) and not sym.strip()) or price is None:
+                return
+            try:
+                fp = float(price)
+            except (TypeError, ValueError):
+                return
+            if not getattr(self, "_logged_first_tick", False):
+                logger.info("First live tick received: symbol=%r ltp=%s", sym, fp)
+                self._logged_first_tick = True
+            self._last_tick_seen_ts = time.time()
+            idx = self._resolve_tick_idx(sym)
             if idx is None:
-                pure_sym = sym.split(':')[-1].replace('-EQ', '')
-                idx = self.shm.get_idx(pure_sym)
-            if idx is not None:
-                # idx_map / RSMathEngine keys are canonical list symbols (e.g. NSE:XXX-EQ). Fyers may send
-                # a different string; using lookup_sym can skip update_tick → day_vol stays 0 → RVOL 0.00.
-                canon_sym = self.symbols[idx]
-                self.math.update_tick(canon_sym, price, vol)
-                if vol > 0:
+                missed = getattr(self, "_tick_unresolved", 0)
+                self._tick_unresolved = missed + 1
+                if missed < 5:
+                    logger.warning("Tick dropped — could not map symbol %r (check idx_map vs Fyers)", sym)
+                return
+            n_sym, n_math = len(self.symbols), self.math.n
+            if idx < 0 or idx >= n_sym or idx >= n_math:
+                if getattr(self, "_tick_idx_bad_logged", 0) < 3:
+                    logger.warning(
+                        "on_tick idx out of range: idx=%s n_sym=%s n_math=%s sym=%r",
+                        idx, n_sym, n_math, sym,
+                    )
+                    self._tick_idx_bad_logged = getattr(self, "_tick_idx_bad_logged", 0) + 1
+                return
+            canon_sym = self.symbols[idx]
+            pcp = m.get("prev_close_price")
+            try:
+                self.math.update_tick(canon_sym, fp, vol, prev_close=pcp)
+            except Exception:
+                pass
+            if vol > 0:
+                try:
+                    self.math.day_vol[idx] = float(vol)
+                except Exception:
+                    pass
+            target = self.shm.arr[idx]
+            target["ltp"] = fp
+            target["heartbeat"] = time.time()
+            try:
+                # Prefer broker CHG% (fyers_apiv3 adds chp when prev_close_price + ltp exist). Matrix [-2] is
+                # often wrong or zero when daily parquet is short — that forced change_pct=0 → grey PRICE/CHG.
+                ch = None
+                if m.get("chp") is not None:
                     try:
-                        self.math.day_vol[idx] = float(vol)
-                    except Exception:
+                        v = float(m["chp"])
+                        if np.isfinite(v):
+                            ch = v
+                    except (TypeError, ValueError):
                         pass
-                target = self.shm.arr[idx]
+                if ch is None:
+                    try:
+                        pcp_f = float(pcp) if pcp is not None else 0.0
+                    except (TypeError, ValueError):
+                        pcp_f = 0.0
+                    if pcp_f > 0:
+                        ch = (fp - pcp_f) / pcp_f * 100.0
+                    else:
+                        prev = float(self.math.prev_close_day[idx])
+                        if prev <= 0:
+                            prev = float(self.math.price_matrix_d[idx, -2])
+                        ch = ((fp - prev) / prev * 100.0) if prev > 0 else 0.0
+                target["change_pct"] = float(ch)
+                target["price_up"] = 1 if ch > 0 else 0
+                target["price_down"] = 1 if ch < 0 else 0
+            except Exception:
+                pass
+
+            try:
                 self._maybe_roll_new_trading_day_ist()
                 self._refresh_mrs_prev_day_cache()
                 full_sym = target["symbol"].decode("utf-8", errors="ignore").strip("\x00").strip()
                 prev_mrs = float(target["mrs"])
-                instant_mrs = self.math.get_instant_mrs(canon_sym, price)
+                instant_mrs = self.math.get_instant_mrs(canon_sym, fp)
                 mpd = self._mrs_prev_day_cache.get(full_sym)
                 target["status"] = self._compute_grid_status(full_sym, prev_mrs, instant_mrs, mpd)
-                target['ltp'] = price
-                target['mrs'] = instant_mrs
+                target["mrs"] = instant_mrs
                 try:
                     rr = int(target["rs_rating"])
                 except Exception:
@@ -661,24 +1165,11 @@ class MasterScanner:
                 target["profile"] = profile_label_to_shm(
                     compute_trading_profile(rr, float(instant_mrs), md)
                 )
-                target['heartbeat'] = time.time()
-                
-                # RVOL: single source — RSMathEngine.compute_rvol (session v / 21d avg)
                 target["rv"] = float(self.math.compute_rvol(idx))
-                
-                # Daily change % + sign flags (same basis as CHG% column / change_pct)
-                prev = float(self.math.price_matrix_d[idx, -2])
-                fp = float(price)
-                if prev > 0:
-                    ch = ((fp - prev) / prev) * 100.0
-                else:
-                    ch = 0.0
-                target["change_pct"] = ch
-                target["price_up"] = 1 if ch > 0 else 0
-                target["price_down"] = 1 if ch < 0 else 0
-        except Exception as e:
+            except Exception:
+                pass
+        except Exception:
             pass
- # High frequency, don't log every tick error unless debugging
 
     def persist_to_postgres(self):
         # SOVEREIGN PROOF: Physically probe every possible memory slot for valid symbols

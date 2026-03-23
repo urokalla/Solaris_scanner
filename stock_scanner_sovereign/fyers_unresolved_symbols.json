@@ -1,0 +1,26 @@
+{
+  "timestamp": 1774263052,
+  "tokens": 2419,
+  "expected": 2437,
+  "missing": 18,
+  "symbols": [
+    "NSE:BVCL-EQ",
+    "NSE:CEWATER-EQ",
+    "NSE:CONSUMBEES-EQ",
+    "NSE:EMULTIMQ-EQ",
+    "NSE:EVERESTIND-EQ",
+    "NSE:FABTECH-EQ",
+    "NSE:FCSSOFT-EQ",
+    "NSE:JAYBARMARU-EQ",
+    "NSE:JUSTDIAL-EQ",
+    "NSE:LATTEYS-EQ",
+    "NSE:MARICO-EQ",
+    "NSE:RADICO-EQ",
+    "NSE:RAMCOIND-EQ",
+    "NSE:SIEMENS-EQ",
+    "NSE:SKFINDIA-EQ",
+    "NSE:TITAN-EQ",
+    "NSE:UYFINCORP-EQ",
+    "NSE:VASCONEQ-EQ"
+  ]
+}

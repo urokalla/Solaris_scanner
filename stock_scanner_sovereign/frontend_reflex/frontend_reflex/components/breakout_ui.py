@@ -18,7 +18,7 @@ def breakout_header():
                 ),
                 align_items="end", spacing="0"
             ),
-            width="100%", padding="10px", border_bottom="1px solid #333333", background_color="#000080"
+            width="100%", padding="10px", border_bottom="1px solid #333333", background_color="#000000"
         ), spacing="0", width="100%"
     )
 def breakout_sidebar():

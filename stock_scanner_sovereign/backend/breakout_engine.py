@@ -99,10 +99,11 @@ class BreakoutScanner:
                 reverse=sort_desc,
             )
         else:
+            # Keep default order stable for a smooth grid (no row jumps every poll).
+            # Users can still use explicit sort controls (mRS / UDAI) when needed.
             data = sorted(
                 data,
-                key=lambda x: (bool(x.get("is_breakout")), str(x.get("symbol", ""))),
-                reverse=True,
+                key=lambda x: str(x.get("symbol", "")),
             )
         p, ps = kw.get("page", 1), kw.get("page_size", 50)
         return {"results": data[(p-1)*ps : p*ps], "total_count": len(data)}

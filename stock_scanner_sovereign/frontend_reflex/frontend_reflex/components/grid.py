@@ -58,7 +58,7 @@ def data_grid():
                 _focus={"border_color": "#FFB000", "box_shadow": "0 0 0 1px rgba(255,176,0,0.25)"},
             ),
             rx.select(["ALL", "ELITE", "LEADER", "RISING", "LAGGARD", "FADING", "BASELINE"], value=State.filter_profile, on_change=State.set_filter_profile, color="white", bg="#111111", border="1px solid #333", size="1", width="100px"),
-            rx.select(["ALL", "BUY", "TRENDING", "NOT TRENDING"], value=State.filter_status, on_change=State.set_filter_status, color="white", bg="#111111", border="1px solid #333", size="1", width="120px"),
+            rx.select(["ALL", "BUY NOW", "TRENDING", "NOT TRENDING"], value=State.filter_status, on_change=State.set_filter_status, color="white", bg="#111111", border="1px solid #333", size="1", width="120px"),
             rx.select(["ALL", "1.5", "2.0", "3.0", "5.0"], value=State.filter_rv, on_change=State.set_filter_rv, color="white", bg="#111111", border="1px solid #333", size="1", width="80px"),
             rx.button("EXPORT EXCEL", on_click=State.download_excel, size="1", bg="#00FF00", color="black", font_weight="bold", _hover={"bg": "#00CC00"}),
             width="100%",
@@ -169,7 +169,7 @@ def data_grid():
                                 r["status"],
                                 title=r["status"],
                                 color=rx.cond(
-                                    r["status"] == "BUY",
+                                    r["status"] == "BUY NOW",
                                     "#00FF00",
                                     rx.cond(
                                         r["status"] == "TRENDING",
