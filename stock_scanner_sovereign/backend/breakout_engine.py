@@ -5,6 +5,110 @@ from .breakout_logic import initial_sync_helper, main_loop_helper, format_ui_row
 
 from .scanner_shm import SHMBridge
 
+
+def _is_index_row(sym) -> bool:
+    s = str(sym or "").upper()
+    return s.endswith("-INDEX") or "-INDEX" in s
+
+
+def _ratio_price_to_brk(d: dict):
+    try:
+        brk = float(d.get("brk_lvl") or 0.0)
+        ltp = float(d.get("ltp") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if brk <= 0 or ltp <= 0:
+        return None
+    return ltp / brk
+
+
+def _normalize_preset_key(preset) -> str:
+    if preset is None:
+        return "ALL"
+    return "_".join(str(preset).strip().upper().split())
+
+
+def _norm_mrs_grid_status(val) -> str:
+    """MRS STATUS column source: master SHM weekly regime (BUY NOW / TRENDING / NOT TRENDING)."""
+    if val is None:
+        return ""
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="ignore").strip().strip("\x00").upper()
+    if hasattr(val, "tobytes"):
+        try:
+            return val.tobytes().decode("utf-8", errors="ignore").strip().strip("\x00").upper()
+        except Exception:
+            pass
+    return str(val).strip().upper()
+
+
+def _mrs_grid_matches_filter(raw, want: str) -> bool:
+    g = _norm_mrs_grid_status(raw)
+    w = (want or "ALL").strip().upper()
+    if w in ("ALL", "", "NONE"):
+        return True
+    if w in ("BUY NOW", "BUY"):
+        return g in ("BUY NOW", "BUY")
+    return g == w
+
+
+def _mrs_grid_sort_priority(d: dict) -> int:
+    """Higher = stronger for default descending sort (BUY NOW first)."""
+    g = _norm_mrs_grid_status(d.get("grid_mrs_status"))
+    if g in ("BUY NOW", "BUY"):
+        return 3
+    if g == "TRENDING":
+        return 2
+    if g == "NOT TRENDING":
+        return 1
+    return 0
+
+
+def _sidecar_preset_keep(d: dict, preset_norm: str) -> bool:
+    if preset_norm in ("ALL", "", "NONE"):
+        return True
+    sym = d.get("symbol")
+    if _is_index_row(sym):
+        return False
+    st_raw = str(d.get("status") or "").strip().upper()
+    try:
+        mrs = float(d.get("mrs") or 0.0)
+    except (TypeError, ValueError):
+        mrs = 0.0
+    try:
+        rv = float(d.get("rv") or 0.0)
+    except (TypeError, ValueError):
+        rv = 0.0
+    try:
+        chp = float(d.get("change_pct") or 0.0)
+    except (TypeError, ValueError):
+        chp = 0.0
+
+    if preset_norm == "BUYNOW_CROSS":
+        # Must match **MRS STATUS** (master SHM): weekly BUY NOW session latch — same source as the column in the grid.
+        return _mrs_grid_matches_filter(d.get("grid_mrs_status"), "BUY NOW")
+    if preset_norm == "BREAKOUT":
+        return bool(d.get("is_breakout")) or st_raw == "BREAKOUT"
+    if preset_norm == "STAGE_2":
+        return st_raw == "STAGE 2"
+    if preset_norm == "EARLY":
+        return mrs > 0 and st_raw in ("NEAR BRK", "STAGE 2")
+    if preset_norm == "RETEST":
+        rb = _ratio_price_to_brk(d)
+        return rb is not None and 0.98 <= rb <= 1.03 and mrs > 0
+    if preset_norm == "STRONG_RETEST":
+        rb = _ratio_price_to_brk(d)
+        return rb is not None and 0.99 <= rb <= 1.02 and mrs > 0 and rv >= 1.0
+    if preset_norm == "FAST20":
+        # Relative volume from master SHM (≈ session cumulative vol / 21d avg); threshold 2.0 = “20” style high RV.
+        return rv >= 2.0
+    if preset_norm == "HIGH10":
+        return chp >= 10.0
+    if preset_norm == "HIGH10_LITE":
+        return chp >= 5.0
+    return True
+
+
 class BreakoutScanner:
     def __init__(self, symbols=None, universe="Nifty 500"):
         self.db, self.bridge = DatabaseManager(), PipelineBridge()
@@ -49,8 +153,13 @@ class BreakoutScanner:
                 
             self.bench_sym = BENCHMARK_MAP.get(self.universe, "NSE:NIFTY50-INDEX")
             self.all_s = list(set(self.symbols + [self.bench_sym]))
-            self.buffers = {s: RingBuffer(500, 6) for s in self.all_s}
-            self.results = {s: {"symbol": s, "ltp": 0.0, "status": "Waiting..."} for s in self.all_s}
+            # Need enough daily history to compute weekly Mansfield mRS (SMA52) and a 30w slope line.
+            # 900 daily bars ≈ 180 weeks — safe headroom for weekly indicators.
+            self.buffers = {s: RingBuffer(900, 6) for s in self.all_s}
+            self.results = {
+                s: {"symbol": s, "ltp": 0.0, "status": "Waiting...", "m_rsi2": None, "m_rsi2_live": False}
+                for s in self.all_s
+            }
             self.pending, self.last_hb = set(self.symbols), {s: 0.0 for s in self.all_s}
             # Daily Pine (Udai Long): position/trail state + throttled Parquet cache (see breakout_logic)
             self.udai_state = {}
@@ -88,23 +197,60 @@ class BreakoutScanner:
                 for d in data
                 if (d.get("status") == st or (st == "BREAKOUT" and d.get("is_breakout")))
             ]
-        data = [format_ui_row(d) for d in data]
+        fm = (kw.get("filter_m_rsi2") or "ALL").strip().upper()
+        if fm == "LT2":
+            data = [
+                d
+                for d in data
+                if d.get("m_rsi2") is not None and float(d["m_rsi2"]) < 2.0
+            ]
+        mgrid = (kw.get("filter_mrs_grid") or "ALL").strip().upper()
+        if mgrid not in ("ALL", "", "NONE"):
+            data = [
+                d
+                for d in data
+                if _mrs_grid_matches_filter(d.get("grid_mrs_status"), mgrid)
+            ]
+        preset_norm = _normalize_preset_key(kw.get("preset"))
+        if preset_norm not in ("ALL", "", "NONE"):
+            data = [d for d in data if _sidecar_preset_keep(d, preset_norm)]
         sort_key = (kw.get("sort_key") or "").strip().lower()
         sort_desc = bool(kw.get("sort_desc", False))
+
+        def _brk_sort_val(x):
+            v = x.get("brk_lvl")
+            try:
+                return float(v) if v is not None else float("-inf")
+            except (TypeError, ValueError):
+                return float("-inf")
+
         if sort_key == "mrs":
             data.sort(key=lambda x: float(x.get("mrs", 0) or 0), reverse=sort_desc)
-        elif sort_key == "udai":
+        elif sort_key == "mrsi2":
             data.sort(
-                key=lambda x: str(x.get("udai_ui", "") or "").lower(),
+                key=lambda x: float(x.get("m_rsi2") if x.get("m_rsi2") is not None else 999.0),
                 reverse=sort_desc,
             )
-        else:
-            # Keep default order stable for a smooth grid (no row jumps every poll).
-            # Users can still use explicit sort controls (mRS / UDAI) when needed.
-            data = sorted(
-                data,
-                key=lambda x: str(x.get("symbol", "")),
+        elif sort_key == "udai":
+            data.sort(
+                key=lambda x: str(x.get("udai_ui") or x.get("udai") or "").lower(),
+                reverse=sort_desc,
             )
+        elif sort_key == "chp":
+            data.sort(key=lambda x: float(x.get("change_pct", 0) or 0), reverse=sort_desc)
+        elif sort_key == "ltp":
+            data.sort(key=lambda x: float(x.get("ltp", 0) or 0), reverse=sort_desc)
+        elif sort_key in ("brk", "brklvl", "brk_lvl"):
+            data.sort(key=_brk_sort_val, reverse=sort_desc)
+        elif sort_key in ("status", "stage"):
+            data.sort(key=lambda x: str(x.get("status", "") or "").lower(), reverse=sort_desc)
+        elif sort_key in ("mrs_grid", "mrs_grid_status", "grid_mrs"):
+            data.sort(key=lambda x: _mrs_grid_sort_priority(x), reverse=sort_desc)
+        elif sort_key == "symbol":
+            data.sort(key=lambda x: str(x.get("symbol", "") or "").lower(), reverse=sort_desc)
+        else:
+            data.sort(key=lambda x: str(x.get("symbol", "") or "").lower())
+        data = [format_ui_row(d) for d in data]
         p, ps = kw.get("page", 1), kw.get("page_size", 50)
         return {"results": data[(p-1)*ps : p*ps], "total_count": len(data)}
 

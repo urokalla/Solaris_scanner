@@ -1,14 +1,74 @@
-import time, threading, logging
+import time, threading, logging, os
+from datetime import datetime, timezone
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+
+import numpy as np
+from zoneinfo import ZoneInfo
 
 from config.settings import settings
 from utils.breakout_math import calculate_breakout_signals
 from utils.quant_breakout_config import merge_params_with_windows
 from utils.pine_udai_long import compute_udai_pine
 from utils.signals_math import compute_mrs_signal_line, detect_pivot_high, effective_pivot_window
+from utils.monthly_rsi2_trade_rules import (
+    blend_last_daily_bar_with_ltp,
+    daily_close_series_from_ohlcv,
+    latest_monthly_rsi2,
+    sidecar_live_rsi2_window_ok,
+)
 
 LGR = logging.getLogger("Breakout")
+
+def _weekly_close_map_from_ohlcv(h: np.ndarray) -> dict[tuple[int, int], float]:
+    """
+    Build { (iso_year, iso_week) : last_close_in_that_week } from daily OHLCV rows.
+    Expected shape: [:, 0]=unix ts seconds, [:, 4]=close.
+    """
+    if h is None or len(h) < 20:
+        return {}
+    out: dict[tuple[int, int], float] = {}
+    try:
+        # h is chronological (RingBuffer ordered view); last write per week wins.
+        for r in h:
+            try:
+                ts = float(r[0])
+                c = float(r[4])
+            except Exception:
+                continue
+            if not np.isfinite(ts) or not np.isfinite(c) or c <= 0:
+                continue
+            d = datetime.utcfromtimestamp(ts).date()
+            iso = d.isocalendar()
+            out[(int(iso.year), int(iso.week))] = c
+    except Exception:
+        return {}
+    return out
+
+
+def _sma_last(values: np.ndarray, n: int) -> float:
+    if values.size < n or n <= 0:
+        return float("nan")
+    return float(np.mean(values[-n:]))
+
+
+def _ema_series(values: np.ndarray, n: int) -> np.ndarray:
+    """EMA over full series; returns same length array (nan where insufficient)."""
+    v = np.asarray(values, dtype=np.float64)
+    if v.size == 0 or n <= 1:
+        return v.copy()
+    alpha = 2.0 / (float(n) + 1.0)
+    out = np.empty_like(v, dtype=np.float64)
+    out[:] = np.nan
+    # seed with SMA(n) at position n-1
+    if v.size >= n:
+        seed = float(np.mean(v[:n]))
+        out[n - 1] = seed
+        prev = seed
+        for i in range(n, v.size):
+            prev = alpha * float(v[i]) + (1.0 - alpha) * prev
+            out[i] = prev
+    return out
 
 
 def _decode_shm_grid_status(raw) -> str:
@@ -31,8 +91,11 @@ def _decode_shm_grid_status(raw) -> str:
 def initial_sync_helper(self):
     def _fetch(s):
         try:
-            d = self.bridge.get_historical_data(s, limit=400)
-            if d is None: d = self.db.get_historical_data(s, "1d", limit=400)
+            # Need sufficient history for weekly Mansfield RS: SMA52 + 30w slope line.
+            lim = int(os.getenv("SIDECAR_HISTORY_DAILY_LIMIT", "900"))
+            d = self.bridge.get_historical_data(s, limit=lim)
+            if d is None:
+                d = self.db.get_historical_data(s, "1d", limit=lim)
             if d is not None and len(d) > 0:
                 with self.lock: [self.buffers[s].append(r) for r in d]; self.pending.add(s)
         except Exception as e: LGR.error(f"Sync {s}: {e}")
@@ -42,21 +105,28 @@ def initial_sync_helper(self):
 def main_loop_helper(self):
     while self.is_scanning:
         time.sleep(0.5)
-        for s in self.all_s:
+        # Snapshot keys so update_universe() replacing buffers cannot KeyError mid-iteration.
+        for s in list(self.all_s):
+            buf = self.buffers.get(s)
+            if buf is None:
+                continue
             if (idx := self.shm.get_idx(s)) is not None:
                 row = self.arr[idx]
                 if (hb := float(row['heartbeat'])) >= self.last_hb.get(s, -1):
                     lp, v = float(row['ltp']), float(row['rv'])
-                    if self.buffers[s].is_empty() or hb > self.last_hb.get(s, -1):
-                        self.buffers[s].append([hb, lp, lp, lp, lp, v])
+                    if buf.is_empty() or hb > self.last_hb.get(s, -1):
+                        buf.append([hb, lp, lp, lp, lp, v])
                     self.last_hb[s] = hb; self.pending.add(s)
                     with self.lock:
-                        self.results[s]['ltp'] = lp
-                        self.results[s]['rv'] = v
-                        self.results[s]['mrs'] = float(row['mrs'])
-                        self.results[s]['change_pct'] = float(row['change_pct'])
+                        rrow = self.results.get(s)
+                        if rrow is None:
+                            continue
+                        rrow['ltp'] = lp
+                        rrow['rv'] = v
+                        rrow['mrs'] = float(row['mrs'])
+                        rrow['change_pct'] = float(row['change_pct'])
                         # Main RS grid STATUS (same as dashboard): from master SHM, not breakout STAGE labels
-                        self.results[s]["grid_mrs_status"] = _decode_shm_grid_status(
+                        rrow["grid_mrs_status"] = _decode_shm_grid_status(
                             row["status"] if "status" in row.dtype.names else None
                         )
         tasks, self.pending = list(self.pending), set()
@@ -84,6 +154,89 @@ def main_loop_helper(self):
                 # 2. MRS signal line (SMA of length mrs_signal_period)
                 mrs_deque = self._mrs_history_buffers[s]["mrs"]
                 mrs_signal = compute_mrs_signal_line(mrs_deque, mrs_period)
+
+                # 2.5. RVCR (weekly-style): match TradingView weekly pane.
+                # - Compute weekly Mansfield mRS series from daily history buffer (hv) + benchmark (b_vw).
+                # - Compute mRS_signal = SMA(mRS, 30) (your Pine script).
+                # - Compute slopeLine = EMA(mRS, 30) or SMA(mRS, 30) (your "slope line").
+                # - Signal when: mRS < 0 AND slopeLine is rising AND crossover(mRS_signal, slopeLine).
+                rvcr_refresh = float(os.getenv("MRS_RVCR_WEEKLY_REFRESH_SEC", "60"))
+                now_ts = time.time()
+                if not hasattr(self, "_rvcr_weekly_cache"):
+                    self._rvcr_weekly_cache = {}
+                cached = self._rvcr_weekly_cache.get(s)
+                if cached and (now_ts - float(cached.get("ts", 0))) < rvcr_refresh:
+                    with self.lock:
+                        self.results[s]["mrs_rcvr"] = bool(cached.get("flag", False))
+                        self.results[s]["mrs_rcvr_slope"] = float(cached.get("slope", 0.0))
+                else:
+                    flag = False
+                    slope_val = 0.0
+                    try:
+                        hv = self.buffers[s].get_ordered_view()
+                        wk_s = _weekly_close_map_from_ohlcv(hv)
+                        wk_b = _weekly_close_map_from_ohlcv(b_vw) if b_vw is not None else {}
+                        if wk_s and wk_b:
+                            keys = sorted(set(wk_s.keys()) & set(wk_b.keys()))
+                            # Need enough weeks for SMA52 + MA30 + 2 bars for slope/cross checks.
+                            need_weeks = int(ma_len + max(sig_len, slope_len) + 2)
+                            if len(keys) >= need_weeks:
+                                s_close = np.asarray([wk_s[k] for k in keys], dtype=np.float64)
+                                b_close = np.asarray([wk_b[k] for k in keys], dtype=np.float64)
+                                ratio = s_close / (b_close + 1e-9)
+                                # Pine: avgRatio = sma(baseRatio, 52); mRS = ((ratio/avgRatio)-1)*10
+                                ma_len = int(os.getenv("MRS_WEEKLY_BASE_MA_LEN", "52"))
+                                sig_len = int(os.getenv("MRS_WEEKLY_SIGNAL_LEN", "30"))
+                                slope_len = int(os.getenv("MRS_RVCR_SLOPE_LEN", "30"))
+                                # rolling SMA for ratio
+                                avg = np.full_like(ratio, np.nan, dtype=np.float64)
+                                if ratio.size >= ma_len:
+                                    csum = np.cumsum(ratio, dtype=np.float64)
+                                    csum = np.insert(csum, 0, 0.0)
+                                    for i2 in range(ma_len - 1, ratio.size):
+                                        avg[i2] = (csum[i2 + 1] - csum[i2 + 1 - ma_len]) / float(ma_len)
+                                mrs_series = np.nan_to_num(((ratio / (avg + 1e-12)) - 1.0) * 10.0, nan=0.0)
+
+                                # Signal line (SMA of mRS)
+                                sig = np.full_like(mrs_series, np.nan, dtype=np.float64)
+                                if mrs_series.size >= sig_len:
+                                    c2 = np.cumsum(mrs_series, dtype=np.float64)
+                                    c2 = np.insert(c2, 0, 0.0)
+                                    for i2 in range(sig_len - 1, mrs_series.size):
+                                        sig[i2] = (c2[i2 + 1] - c2[i2 + 1 - sig_len]) / float(sig_len)
+
+                                # Slope line: EMA30 or SMA30 of mRS
+                                ma_type = os.getenv("MRS_RVCR_SLOPE_MA_TYPE", "EMA").strip().upper()
+                                if ma_type == "SMA":
+                                    slope = np.full_like(mrs_series, np.nan, dtype=np.float64)
+                                    if mrs_series.size >= slope_len:
+                                        c3 = np.cumsum(mrs_series, dtype=np.float64)
+                                        c3 = np.insert(c3, 0, 0.0)
+                                        for i2 in range(slope_len - 1, mrs_series.size):
+                                            slope[i2] = (c3[i2 + 1] - c3[i2 + 1 - slope_len]) / float(slope_len)
+                                else:
+                                    slope = _ema_series(mrs_series, slope_len)
+
+                                # Latest usable index (both lines present)
+                                i_last = int(mrs_series.size - 1)
+                                if i_last >= 1 and np.isfinite(sig[i_last]) and np.isfinite(slope[i_last]) and np.isfinite(slope[i_last - 1]):
+                                    mrs_now = float(mrs_series[i_last])
+                                    slope_up = float(slope[i_last]) > float(slope[i_last - 1])
+                                    # Your weekly chart visual: mRS (green) breaking above the slope MA line.
+                                    cross = (float(mrs_series[i_last - 1]) <= float(slope[i_last - 1])) and (
+                                        float(mrs_series[i_last]) > float(slope[i_last])
+                                    )
+                                    zmax = float(os.getenv("MRS_RCVR_BELOW_ZERO_MAX", "0"))
+                                    flag = (mrs_now < zmax) and slope_up and cross
+                                    slope_val = float(slope[i_last] - slope[i_last - 1])
+                    except Exception:
+                        flag = False
+                        slope_val = 0.0
+
+                    self._rvcr_weekly_cache[s] = {"ts": now_ts, "flag": bool(flag), "slope": float(slope_val)}
+                    with self.lock:
+                        self.results[s]["mrs_rcvr"] = bool(flag)
+                        self.results[s]["mrs_rcvr_slope"] = float(slope_val)
 
                 # 3. Generate Pro Signature Signal
                 p["rs_rating_info"] = {
@@ -161,6 +314,375 @@ def main_loop_helper(self):
         except Exception as e:
             LGR.error(f"brk_lvl DB persist: {e}")
 
+        # Monthly RSI(2): run in a daemon thread so this loop never blocks on 100–500× Parquet/DB + pandas.
+        if settings.SIDECAR_M_RSI2:
+            now_ts = time.time()
+            interval = float(settings.SIDECAR_M_RSI2_REFRESH_SEC)
+            thr = getattr(self, "_mrsi2_refresh_thread", None)
+            if now_ts - getattr(self, "_mrsi2_ts", 0) >= interval:
+                if thr is None or not thr.is_alive():
+                    self._mrsi2_ts = now_ts
+
+                    def _mrsi2_worker():
+                        try:
+                            _refresh_sidecar_monthly_rsi2(self)
+                        except Exception:
+                            LGR.exception("mRSI2 background refresh failed")
+
+                    self._mrsi2_refresh_thread = threading.Thread(
+                        target=_mrsi2_worker,
+                        daemon=True,
+                        name="sidecar-mrsi2-refresh",
+                    )
+                    self._mrsi2_refresh_thread.start()
+
+        # Daily pre-thrust indicators (your "missing yesterday" bucket):
+        # Run once per day after 14:30 IST and persist to Postgres for quick checks.
+        if settings.SIDECAR_PRE_THRUST_ENABLED:
+            try:
+                IST = ZoneInfo("Asia/Kolkata")
+                now = datetime.now(IST)
+                target_h = int(settings.SIDECAR_PRE_THRUST_IST_HOUR)
+                target_m = int(settings.SIDECAR_PRE_THRUST_IST_MINUTE)
+                target_hit = (now.hour > target_h) or (now.hour == target_h and now.minute >= target_m)
+                done_date = getattr(self, "_pre_thrust_done_date", None)
+                thr = getattr(self, "_pre_thrust_refresh_thread", None)
+                if target_hit and done_date != now.date():
+                    if thr is None or not thr.is_alive():
+                        self._pre_thrust_done_date = now.date()
+
+                        def _pre_thrust_worker():
+                            try:
+                                _refresh_sidecar_pre_thrust(self, run_date=now.date())
+                            except Exception:
+                                LGR.exception("Pre-thrust refresh failed")
+
+                        self._pre_thrust_refresh_thread = threading.Thread(
+                            target=_pre_thrust_worker,
+                            daemon=True,
+                            name="sidecar-pre-thrust-refresh",
+                        )
+                        self._pre_thrust_refresh_thread.start()
+            except Exception:
+                # Never let a scheduling bug kill sidecar scanning.
+                pass
+
+def _refresh_sidecar_monthly_rsi2(self):
+    live_ok = sidecar_live_rsi2_window_ok(
+        hour=settings.SIDECAR_M_RSI2_LIVE_IST_HOUR,
+        minute=settings.SIDECAR_M_RSI2_LIVE_IST_MINUTE,
+    )
+    for s in self.symbols:
+        if s == self.bench_sym:
+            continue
+        try:
+            d_hist = self.udai_ohlcv.get(s)
+            if d_hist is None or len(d_hist) < 80:
+                d_hist = self.bridge.get_historical_data(s, limit=400)
+                if d_hist is None:
+                    d_hist = self.db.get_historical_data(s, "1d", limit=400)
+            if d_hist is None or len(d_hist) < 80:
+                with self.lock:
+                    self.results[s]["m_rsi2"] = None
+                    self.results[s]["m_rsi2_live"] = False
+                continue
+            arr = np.asarray(d_hist)
+            base = daily_close_series_from_ohlcv(arr)
+            if base is None:
+                with self.lock:
+                    self.results[s]["m_rsi2"] = None
+                    self.results[s]["m_rsi2_live"] = False
+                continue
+            with self.lock:
+                lp = float(self.results[s].get("ltp", 0) or 0)
+            series = base
+            used_live = False
+            if live_ok and lp > 0:
+                series = blend_last_daily_bar_with_ltp(base, lp)
+                used_live = True
+            lr = latest_monthly_rsi2(series, period=2)
+            with self.lock:
+                if lr:
+                    self.results[s]["m_rsi2"] = float(lr[1])
+                    self.results[s]["m_rsi2_live"] = used_live
+                else:
+                    self.results[s]["m_rsi2"] = None
+                    self.results[s]["m_rsi2_live"] = False
+        except Exception as e:
+            LGR.error(f"mRSI2 {s}: {e}")
+
+def _score_pre_thrust_setup(
+    *,
+    years: int,
+    y_vol_x20: float | None,
+    y_rng_x_atr14: float | None,
+    y_near_20d_high: bool,
+    y_near_52w_high: bool,
+    y_near_multiy_high: bool,
+    y_compress_10d: bool,
+    y_compress_20d: bool,
+):
+    """
+    Same explainable points model as `scripts/live_big_move_audit.py` (yesterday features only).
+    """
+    pts = 0
+    why: list[str] = []
+
+    if y_near_multiy_high:
+        pts += 4
+        why.append(f"{years}Y_HIGH(+4)")
+    elif y_near_52w_high:
+        pts += 3
+        why.append("52W_HIGH(+3)")
+    elif y_near_20d_high:
+        pts += 2
+        why.append("20D_HIGH(+2)")
+
+    if y_compress_20d:
+        pts += 2
+        why.append("COMP20(+2)")
+    if y_compress_10d:
+        pts += 2
+        why.append("COMP10(+2)")
+
+    if y_vol_x20 is not None and np.isfinite(y_vol_x20):
+        if y_vol_x20 >= 3.0:
+            pts += 3
+            why.append("Y_VOLx20>=3(+3)")
+        elif y_vol_x20 >= 2.0:
+            pts += 2
+            why.append("Y_VOLx20>=2(+2)")
+        elif y_vol_x20 >= 1.5:
+            pts += 1
+            why.append("Y_VOLx20>=1.5(+1)")
+
+    if y_rng_x_atr14 is not None and np.isfinite(y_rng_x_atr14):
+        if y_rng_x_atr14 >= 2.0:
+            pts += 3
+            why.append("Y_RNG/ATR>=2(+3)")
+        elif y_rng_x_atr14 >= 1.5:
+            pts += 2
+            why.append("Y_RNG/ATR>=1.5(+2)")
+        elif y_rng_x_atr14 >= 1.2:
+            pts += 1
+            why.append("Y_RNG/ATR>=1.2(+1)")
+
+    return int(pts), why
+
+
+def _compute_yesterday_pre_thrust_features_from_hv(
+    hv: np.ndarray,
+    *,
+    years: int,
+):
+    """
+    hv expected columns: [:,0]=unix ts seconds, [:,1]=open, [:,2]=high, [:,3]=low, [:,4]=close, [:,5]=volume
+    """
+    if hv is None or len(hv) < 60 or hv.shape[1] < 6:
+        return None
+    i_y = len(hv) - 1
+
+    o = hv[:, 1].astype(np.float64)
+    h = hv[:, 2].astype(np.float64)
+    l = hv[:, 3].astype(np.float64)
+    c = hv[:, 4].astype(np.float64)
+    v = hv[:, 5].astype(np.float64)
+
+    y_close = float(c[i_y])
+    if not np.isfinite(y_close) or y_close <= 0:
+        return None
+
+    # Volume expansion vs prior 20 sessions.
+    y_vol_x20 = None
+    if i_y >= 21:
+        base = v[i_y - 20 : i_y]
+        denom = float(np.mean(base)) if base.size else 0.0
+        if np.isfinite(denom) and denom > 0 and np.isfinite(v[i_y]):
+            y_vol_x20 = float(v[i_y] / denom)
+
+    # Range vs ATR(14)
+    y_rng_x_atr14 = None
+    if i_y >= 16:
+        prev_c = c[:-1]
+        tr = np.zeros_like(c, dtype=np.float64)
+        tr[1:] = np.maximum.reduce(
+            [
+                (h[1:] - l[1:]),
+                np.abs(h[1:] - prev_c),
+                np.abs(l[1:] - prev_c),
+            ]
+        )
+        atr_last = float(np.mean(tr[i_y - 13 : i_y + 1])) if i_y - 13 >= 0 else float("nan")
+        if np.isfinite(atr_last) and atr_last > 0:
+            y_rng = float(h[i_y] - l[i_y])
+            y_rng_x_atr14 = float(y_rng / atr_last)
+
+    # Near highs
+    y_near_20d_high = False
+    if i_y >= 20:
+        hh20 = float(np.nanmax(h[i_y - 19 : i_y + 1]))
+        if np.isfinite(hh20) and hh20 > 0:
+            y_near_20d_high = bool(y_close >= 0.98 * hh20)
+
+    win_52w = 252
+    y_near_52w_high = False
+    if i_y >= min(win_52w, len(hv) - 1):
+        start = max(0, i_y - win_52w + 1)
+        hh = float(np.nanmax(h[start : i_y + 1]))
+        if np.isfinite(hh) and hh > 0:
+            y_near_52w_high = bool(y_close >= 0.98 * hh)
+
+    win_my = int(max(252, years * 252))
+    y_near_multiy_high = False
+    if i_y >= min(win_my, len(hv) - 1):
+        start = max(0, i_y - win_my + 1)
+        hh = float(np.nanmax(h[start : i_y + 1]))
+        if np.isfinite(hh) and hh > 0:
+            y_near_multiy_high = bool(y_close >= 0.98 * hh)
+
+    # Compression
+    rets = np.zeros_like(c, dtype=np.float64)
+    rets[1:] = np.where(c[:-1] > 0, c[1:] / c[:-1] - 1.0, 0.0)
+    y_compress_10d = False
+    y_compress_20d = False
+    if i_y >= 40:
+        r10 = rets[i_y - 9 : i_y + 1]
+        r10_prev = rets[i_y - 19 : i_y - 9]
+        s10 = float(np.std(r10, ddof=0)) if r10.size else float("nan")
+        s10p = float(np.std(r10_prev, ddof=0)) if r10_prev.size else float("nan")
+        if np.isfinite(s10) and np.isfinite(s10p) and s10p > 0:
+            y_compress_10d = bool(s10 <= 0.6 * s10p)
+
+        r20 = rets[i_y - 19 : i_y + 1]
+        r20_prev = rets[i_y - 39 : i_y - 19]
+        s20 = float(np.std(r20, ddof=0)) if r20.size else float("nan")
+        s20p = float(np.std(r20_prev, ddof=0)) if r20_prev.size else float("nan")
+        if np.isfinite(s20) and np.isfinite(s20p) and s20p > 0:
+            y_compress_20d = bool(s20 <= 0.6 * s20p)
+
+    # y_date from the daily timestamp -> convert from UTC to IST
+    y_date = None
+    try:
+        ts_y = float(hv[i_y, 0])
+        y_date = datetime.fromtimestamp(ts_y, tz=timezone.utc).astimezone(ZoneInfo("Asia/Kolkata")).date()
+    except Exception:
+        y_date = None
+
+    return {
+        "y_date": y_date,
+        "y_vol_x20": y_vol_x20,
+        "y_rng_x_atr14": y_rng_x_atr14,
+        "y_near_20d_high": y_near_20d_high,
+        "y_near_52w_high": y_near_52w_high,
+        "y_near_multiy_high": y_near_multiy_high,
+        "y_compress_10d": y_compress_10d,
+        "y_compress_20d": y_compress_20d,
+    }
+
+
+def _refresh_sidecar_pre_thrust(self, *, run_date):
+    """
+    Compute and persist "pre-thrust" indicators once per day (~14:30 IST).
+    """
+    years = int(getattr(settings, "SIDECAR_PRE_THRUST_MULTIYEAR_YEARS", 3))
+    score_min = int(getattr(settings, "SIDECAR_PRE_THRUST_SCORE_MIN", 6))
+    vol_min = float(getattr(settings, "SIDECAR_PRE_THRUST_Y_VOL_X20_MIN", 2.0))
+    rng_min = float(getattr(settings, "SIDECAR_PRE_THRUST_Y_RNG_ATR14_MIN", 1.5))
+    live_chg_min = float(getattr(settings, "SIDECAR_PRE_THRUST_LIVE_CHG_PCT_MIN", 10.0))
+    max_movers = int(getattr(settings, "SIDECAR_PRE_THRUST_MAX_MOVERS", 30))
+
+    # Find live movers from SHM, then only analyze those symbols (much faster + avoids ring-buffer pollution).
+    movers: list[tuple[float, str]] = []
+    for s in self.symbols:
+        if not s or "-INDEX" in str(s).upper():
+            continue
+        try:
+            idx = self.shm.get_idx(s)
+            if idx is None:
+                continue
+            chg = float(self.arr[idx]["change_pct"])
+            if np.isfinite(chg) and chg >= live_chg_min:
+                movers.append((chg, s))
+        except Exception:
+            continue
+    movers.sort(key=lambda x: x[0], reverse=True)
+    movers = movers[:max_movers]
+
+    rows: list[tuple] = []
+    top: list[tuple] = []
+
+    # Need enough daily bars for multi-year windows.
+    limit = max(900, int(years * 252) + 60)
+
+    for _, s in movers:
+        try:
+            d_hist = self.bridge.get_historical_data(s, limit=limit)
+            feats = _compute_yesterday_pre_thrust_features_from_hv(d_hist, years=years) if d_hist is not None else None
+            if not feats or feats.get("y_date") is None:
+                continue
+
+            y_score, why = _score_pre_thrust_setup(
+                years=years,
+                y_vol_x20=feats.get("y_vol_x20"),
+                y_rng_x_atr14=feats.get("y_rng_x_atr14"),
+                y_near_20d_high=bool(feats.get("y_near_20d_high")),
+                y_near_52w_high=bool(feats.get("y_near_52w_high")),
+                y_near_multiy_high=bool(feats.get("y_near_multiy_high")),
+                y_compress_10d=bool(feats.get("y_compress_10d")),
+                y_compress_20d=bool(feats.get("y_compress_20d")),
+            )
+
+            # Candidate definition: store only meaningful setups to keep DB clean.
+            y_vol_x20 = feats.get("y_vol_x20")
+            y_rng_x_atr14 = feats.get("y_rng_x_atr14")
+            y_compress_20d = bool(feats.get("y_compress_20d"))
+            is_candidate = (
+                (y_score >= score_min)
+                or (y_vol_x20 is not None and np.isfinite(y_vol_x20) and y_vol_x20 >= vol_min)
+                or (y_rng_x_atr14 is not None and np.isfinite(y_rng_x_atr14) and y_rng_x_atr14 >= rng_min)
+                or y_compress_20d
+            )
+            if not is_candidate:
+                continue
+
+            y_label = ",".join(why) if why else None
+            rows.append(
+                (
+                    s,
+                    run_date,
+                    feats["y_date"],
+                    feats.get("y_vol_x20"),
+                    feats.get("y_rng_x_atr14"),
+                    int(feats.get("y_compress_10d", False)),
+                    int(feats.get("y_compress_20d", False)),
+                    int(feats.get("y_near_20d_high", False)),
+                    int(feats.get("y_near_52w_high", False)),
+                    int(feats.get("y_near_multiy_high", False)),
+                    y_score,
+                    y_label,
+                )
+            )
+            top.append((y_score, s, y_label))
+        except Exception:
+            # Keep looping even if one symbol/parquet fetch fails.
+            continue
+
+    if rows:
+        try:
+            self.db.upsert_pre_thrust_watchlist(rows)
+        except Exception:
+            LGR.exception("DB upsert for pre-thrust failed")
+
+        top_sorted = sorted(top, key=lambda x: x[0], reverse=True)[:15]
+        LGR.info(
+            "Pre-thrust persisted for run_date=%s candidates=%s top=%s",
+            run_date,
+            len(rows),
+            ", ".join([f"{sc}:{sym}" for sc, sym, _ in top_sorted if sym]),
+        )
+    else:
+        LGR.info("Pre-thrust: no candidates computed for run_date=%s", run_date)
+
 def format_ui_row(d):
     s = d.get('symbol', '')
     try:
@@ -199,6 +721,14 @@ def format_ui_row(d):
         chp_color = "#00FF00"
     else:
         chp_color = "#D1D1D1"
+    _mr = d.get("m_rsi2")
+    _mrl = d.get("m_rsi2_live")
+    if _mr is None:
+        mrsi_ui, mrsi_color = "—", "#D1D1D1"
+    else:
+        mfv = float(_mr)
+        mrsi_ui = f"{mfv:.2f}" + ("*" if _mrl else "")
+        mrsi_color = "#00FF00" if mfv < 2.0 else ("#FFB000" if mfv < 5.0 else "#D1D1D1")
     d.update({
         'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': chp_color,
         'rv': f"{rv:.2f}", 'rv_color': "#00FF00" if rv >= 1.5 else "#D1D1D1",
@@ -209,9 +739,14 @@ def format_ui_row(d):
         'mrs_color': "#00FF00" if mrs > 0 else ("#FF3131" if mrs < 0 else "#D1D1D1"),
         'mrs_grid_status': _gs,
         'mrs_grid_status_color': _gsc,
+        'mrs_rcvr': bool(d.get("mrs_rcvr", False)),
+        'mrs_rcvr_str': f"{float(d.get('mrs_rcvr_slope', 0.0)):+.3f}" + (" ↑<0" if bool(d.get("mrs_rcvr", False)) else ""),
+        'mrs_rcvr_color': "#00FFAA" if bool(d.get("mrs_rcvr", False)) else "#555555",
         'brk_lvl': brk_disp,
         'stop_price': stop_disp,
         'udai_ui': udai_disp,
+        'm_rsi2_ui': mrsi_ui,
+        'm_rsi2_color': mrsi_color,
         'is_breakout': bool(d.get('is_breakout', False)),
     })
     return d

@@ -5,6 +5,10 @@ import time
 logger = logging.getLogger(__name__)
 from scipy.stats import rankdata
 from utils.signals_math import session_rvol
+from utils.mrs_weekly_dynamics import (
+    mansfield_mrs_ols_slope,
+    weekly_mrs_trailing_series,
+)
 
 class RSMathEngine:
     def __init__(self, symbols, bench_sym="NSE:NIFTY500-INDEX"):
@@ -35,6 +39,10 @@ class RSMathEngine:
         # SOVEREIGN BRAIN: Physical storage for Intelligence results
         self.mrs_results = np.zeros(self.n)  # W_mRS
         self.mrs_daily = np.zeros(self.n)    # D_mRS
+        self.mrs_mansfield_slope = np.zeros(self.n)
+        self.mrs_w_slope_4w = np.zeros(self.n)
+        self.mrs_w_slope_1w = np.zeros(self.n)
+        self.mrs_w_belowzero_rising = np.zeros(self.n, dtype=bool)
         self.rs_ratings = np.zeros(self.n, dtype=int)
         self.vol_avg = np.zeros(self.n)
         # Today's cumulative volume (Fyers tick `v`); RVOL = day_vol / vol_avg
@@ -184,7 +192,37 @@ class RSMathEngine:
         
         # 4. Zero Shield: Empty data = Zero rating
         self.rs_ratings = np.where(self.price_matrix_d[:, -1] == 0, 0, self.rs_ratings)
-        
+
+        # 5. Mansfield mRS slope: OLS on trailing weekly mRS (oldest→newest); RCVR = below 0 + positive slope.
+        try:
+            K = int(os.getenv("MRS_MANSFIELD_SLOPE_WEEKS", "10"))
+            K = max(3, min(K, self.lookback_w - 1))
+            Y = weekly_mrs_trailing_series(self.price_matrix_w, self.bench_prices_w, K)
+            self.mrs_mansfield_slope = mansfield_mrs_ols_slope(Y)
+            self.mrs_w_slope_1w = Y[:, -1] - Y[:, -2]
+            if Y.shape[1] >= 5:
+                self.mrs_w_slope_4w = Y[:, -1] - Y[:, -5]
+            else:
+                self.mrs_w_slope_4w = Y[:, -1] - Y[:, 0]
+            thr_slope = float(os.getenv("MRS_MANSFIELD_SLOPE_MIN", "0.035"))
+            zmax = float(os.getenv("MRS_RCVR_BELOW_ZERO_MAX", "0"))
+            alive = self.price_matrix_d[:, -1] != 0
+            short_up = True
+            if os.getenv("MRS_MANSFIELD_REQUIRE_SHORT_UP", "true").lower() in ("1", "true", "yes"):
+                short_up = self.mrs_w_slope_1w > float(os.getenv("MRS_MANSFIELD_SHORT_UP_EPS", "0"))
+            self.mrs_w_belowzero_rising = (
+                alive
+                & (self.mrs_results < zmax)
+                & (self.mrs_mansfield_slope > thr_slope)
+                & short_up
+            )
+        except Exception as ex:
+            logger.debug("mrs weekly dynamics skipped: %s", ex)
+            self.mrs_mansfield_slope = np.zeros(self.n)
+            self.mrs_w_slope_4w = np.zeros(self.n)
+            self.mrs_w_slope_1w = np.zeros(self.n)
+            self.mrs_w_belowzero_rising = np.zeros(self.n, dtype=bool)
+
         return self.mrs_results, self.mrs_daily, self.rs_ratings
 
     def update_tick(self, sym, price, session_vol=None, prev_close=None):

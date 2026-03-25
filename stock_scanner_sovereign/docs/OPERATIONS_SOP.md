@@ -125,6 +125,14 @@ Run from host with correct `DB_HOST` / paths, or **`docker compose exec -w /app 
 docker compose exec -w /app pipeline python scripts/eod_sync.py
 ```
 
+**Monthly RSI2 LT2 snapshot (DBeaver / Excel)** — `pipeline` runs this on weekdays after `MONTHLY_RSI2_SNAPSHOT_IST_HOUR/MINUTE` (compose default 15:00 IST). Set `MONTHLY_RSI2_SNAPSHOT_ENABLED=0` to disable. Manual:
+
+```bash
+docker compose exec -w /app/stock_scanner_sovereign pipeline \
+  python scripts/populate_monthly_rsi2_snapshot.py
+# default --source parquet (PIPELINE_DATA_DIR); add --source db for Postgres 1d only
+```
+
 **Full DB-driven backfill (heavy):**
 
 ```bash

@@ -18,7 +18,16 @@ def breakout_alpha_feed():
                     lambda r: rx.box(
                         rx.vstack(
                             rx.hstack(
-                                rx.text(r["symbol"], font_weight="bold", color="#FFB000", font_size="14px"),
+                                rx.text(
+                                    r["symbol"],
+                                    font_weight="bold",
+                                    color="#FFB000",
+                                    font_size="14px",
+                                    cursor="pointer",
+                                    text_decoration="underline",
+                                    _hover={"color": "#00E5FF"},
+                                    on_click=BreakoutState.open_tradingview(r["symbol"]),
+                                ),
                                 rx.spacer(),
                                 rx.badge("🔥 BREAKOUT", color_scheme="green", variant="solid", font_size="10px"),
                             ),
@@ -60,10 +69,50 @@ def breakout_alpha_feed():
 
 def breakout_data_grid():
     header_row = rx.table.row(
-        rx.table.column_header_cell("SIDECAR", color="white"),
-        rx.table.column_header_cell("PRICE", color="white"),
-        rx.table.column_header_cell("CHG%", color="white"),
-        rx.table.column_header_cell("BRK_LVL", color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("SIDECAR", color="white"),
+                rx.text(BreakoutState.symbol_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_symbol,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("PRICE", color="white"),
+                rx.text(BreakoutState.ltp_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_ltp,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("CHG%", color="white"),
+                rx.text(BreakoutState.chp_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_chp,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("BRK_LVL", color="white"),
+                rx.text(BreakoutState.brk_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_brk,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell("TREND", color="white"),
         rx.table.column_header_cell(
             rx.hstack(
@@ -76,7 +125,30 @@ def breakout_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell("MRS STATUS", color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("MRS STATUS", color="white"),
+                rx.text(BreakoutState.mrs_grid_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_mrs_grid,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell("RVCR", color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("Mn RSI2", color="white"),
+                rx.text(BreakoutState.mrsi2_sort_arrow, color="#FFB000", font_size="10px"),
+                rx.text("*=LTP", color="#666666", font_size="8px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_mrsi2,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(
             rx.hstack(
                 rx.text("UDAI", color="white"),
@@ -88,13 +160,35 @@ def breakout_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell("BRK STAGE", color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("BRK STAGE", color="white"),
+                rx.text(BreakoutState.stage_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_stage,
+            ),
+            color="white",
+        ),
     )
     body = rx.table.body(
         rx.foreach(
             BreakoutState.paginated_results,
             lambda r: rx.table.row(
-                rx.table.cell(r["symbol"], color="#FFB000", font_weight="bold", font_size="12px", padding_y="0"),
+                rx.table.cell(
+                    rx.box(
+                        r["symbol"],
+                        color="#FFB000",
+                        font_weight="bold",
+                        font_size="12px",
+                        cursor="pointer",
+                        text_decoration="underline",
+                        _hover={"color": "#00E5FF"},
+                        on_click=BreakoutState.open_tradingview(r["symbol"]),
+                    ),
+                    padding_y="0",
+                ),
                 rx.table.cell(r["ltp"], color=r["chp_color"], font_size="12px", padding_y="0"),
                 rx.table.cell(rx.text(r["chp"], color=r["chp_color"]), font_size="12px", padding_y="0"),
                 rx.table.cell(r["brk_lvl"], color="#D1D1D1", font_size="12px", padding_y="0"),
@@ -102,6 +196,19 @@ def breakout_data_grid():
                 rx.table.cell(rx.text(r["mrs_weekly"], color=r["mrs_color"]), font_size="12px", padding_y="0"),
                 rx.table.cell(
                     rx.text(r.get("mrs_grid_status", "—"), color=r.get("mrs_grid_status_color", "#D1D1D1")),
+                    font_size="11px",
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.text(
+                        r.get("mrs_rcvr_str", "—"),
+                        color=rx.cond(r.get("mrs_rcvr", False), "#00FFAA", "#555555"),
+                    ),
+                    font_size="11px",
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.text(r.get("m_rsi2_ui", "—"), color=r.get("m_rsi2_color", "#D1D1D1")),
                     font_size="11px",
                     padding_y="0",
                 ),

@@ -4,7 +4,7 @@ import logging.handlers
 import numpy as np
 from fyers_apiv3.FyersWebsocket import data_ws
 from fyers_apiv3 import fyersModel
-from backend.database import DatabaseManager
+from backend.database import DatabaseManager, _is_deadlock_exception, acquire_live_state_xact_lock
 from backend.scanner_shm import SHMBridge
 from backend.scanner_math import RSMathEngine
 from utils.scanner_analysis import compute_trading_profile, profile_label_to_shm
@@ -151,6 +151,7 @@ class MasterScanner:
         self._last_health_log_ts: float = 0.0
         self._last_tick_seen_ts: float = 0.0
         self._last_targeted_resub_ts: float = 0.0
+        self._last_stale_resub_ts: float = 0.0
         self._invalid_ws_symbols_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "fyers_invalid_symbols.json")
         )
@@ -280,6 +281,96 @@ class MasterScanner:
             )
         except Exception as e:
             logger.debug("Targeted unresolved resubscribe skipped: %s", e)
+
+    def _maybe_resubscribe_stale_symbols(self):
+        """
+        Fyers can stop delivering ticks for symbols that still appear in symbol_token.
+        Re-issue subscribe() for SHM rows whose heartbeat is very stale while the socket
+        is still receiving some ticks (active session).
+        """
+        try:
+            if self.ws is None or not self.ws.is_connected():
+                return
+            if os.getenv("FYERS_WS_STALE_RESUB_ENABLE", "true").lower() not in ("1", "true", "yes"):
+                return
+            now = time.time()
+            cooldown = float(os.getenv("FYERS_WS_STALE_RESUB_COOLDOWN_SEC", "55"))
+            if (now - self._last_stale_resub_ts) < cooldown:
+                return
+            feed_fresh = float(os.getenv("FYERS_WS_STALE_RESUB_FEED_FRESH_SEC", "120"))
+            if self._last_tick_seen_ts <= 0 or (now - self._last_tick_seen_ts) > feed_fresh:
+                return
+            base_stale = float(os.getenv("SCANNER_STALE_HEARTBEAT_SEC", "120"))
+            min_stale = float(
+                os.getenv("FYERS_WS_STALE_RESUB_MIN_SEC", str(max(180.0, base_stale + 60.0)))
+            )
+            n_sym = min(len(self.symbols), len(self.shm.arr))
+            if n_sym <= 0:
+                return
+            stale_idx = []
+            for i in range(n_sym):
+                try:
+                    hb = float(self.shm.arr[i]["heartbeat"])
+                except Exception:
+                    hb = 0.0
+                if hb <= 0 or (now - hb) > min_stale:
+                    stale_idx.append(i)
+            if not stale_idx:
+                return
+            # Avoid "subscription thrash": if a large portion of the universe is stale at once
+            # (common when many symbols don't tick frequently), re-subscribing can disrupt
+            # the feed without improving coverage.
+            stale_ratio = float(len(stale_idx)) / float(max(n_sym, 1))
+            max_ratio = float(os.getenv("FYERS_WS_STALE_RESUB_MAX_STALE_RATIO", "0.25"))
+            if stale_ratio >= max_ratio:
+                logger.info(
+                    "⏸️ [ResubStale] Skip: too many stale symbols (stale=%s/%s ratio=%.2f >= %.2f)",
+                    len(stale_idx),
+                    n_sym,
+                    stale_ratio,
+                    max_ratio,
+                )
+                return
+            self._load_invalid_ws_symbols()
+            blocked = set(self._invalid_ws_symbols)
+            _ws_dtype = os.getenv("FYERS_WS_DATA_TYPE", "SymbolUpdate")
+            fyers_syms: list[str] = []
+            for i in stale_idx:
+                s = self.symbols[i]
+                fy = self._to_fyers_symbol(f"NSE:{s}-EQ" if ":" not in str(s) else s)
+                if str(fy).upper() not in blocked:
+                    fyers_syms.append(fy)
+            if not fyers_syms:
+                return
+            # Dedupe preserve order
+            seen: set[str] = set()
+            deduped = []
+            for x in fyers_syms:
+                u = str(x).upper()
+                if u not in seen:
+                    seen.add(u)
+                    deduped.append(x)
+            cap = max(10, min(500, int(os.getenv("FYERS_WS_STALE_RESUB_MAX", "250"))))
+            to_sub = deduped[:cap]
+            batch = max(10, min(80, int(os.getenv("FYERS_WS_STALE_RESUB_BATCH", "40"))))
+            bsleep = float(os.getenv("FYERS_WS_STALE_RESUB_BATCH_SLEEP", "0.25"))
+            self._last_stale_resub_ts = now
+            for j in range(0, len(to_sub), batch):
+                b = to_sub[j : j + batch]
+                try:
+                    self.ws.subscribe(symbols=b, data_type=_ws_dtype)
+                except Exception:
+                    pass
+                time.sleep(bsleep)
+            logger.info(
+                "🔁 [ResubStale] Re-subscribed %s/%s symbols with heartbeat > %.0fs (feed fresh < %.0fs)",
+                len(to_sub),
+                len(deduped),
+                min_stale,
+                feed_fresh,
+            )
+        except Exception as e:
+            logger.debug("Stale resubscribe skipped: %s", e)
 
     def _log_tick_health(self):
         """
@@ -518,7 +609,7 @@ class MasterScanner:
         try:
             filters = filters or {}
             logger.info(f"📊 UI Request -> Page: {page}, Size: {page_size}, Filters: {filters}")
-            
+
             # Step 1: Universal Load (Trust the Index Map before filtering)
             valid_symbols = set(self.symbols)
             
@@ -542,6 +633,8 @@ class MasterScanner:
             search_q = str(search_val).upper().strip() if search_val else ""
             status_f = str(filters.get("status", "ALL")).upper()
             profile_f = str(filters.get("profile", "ALL")).upper()
+            mrs_min_f = str(filters.get("mrs_min", "ALL")).upper()
+            rv_min_f = str(filters.get("rv_min", "ALL")).upper()
             n_sym = len(self.symbols)
             for i in range(min(n_sym, len(self.shm.arr))):
                 sym = self.symbols[i]
@@ -571,31 +664,61 @@ class MasterScanner:
                     continue
                 # ---------------------------------------------
 
+                mrs_v = float(r["mrs"])
+                if mrs_min_f != "ALL":
+                    try:
+                        if mrs_v < float(mrs_min_f):
+                            continue
+                    except ValueError:
+                        pass
+                rv_v = float(r["rv"])
+                if rv_min_f != "ALL":
+                    try:
+                        if rv_v < float(rv_min_f):
+                            continue
+                    except ValueError:
+                        pass
+
                 ch_pct = float(r["change_pct"])
                 if not np.isfinite(ch_pct):
                     ch_pct = 0.0
+                _s4 = getattr(self.math, "mrs_w_slope_4w", None)
+                _ms = getattr(self.math, "mrs_mansfield_slope", None)
+                _rc = getattr(self.math, "mrs_w_belowzero_rising", None)
+                slope4 = float(_s4[i]) if _s4 is not None and i < len(_s4) else 0.0
+                m_slope = float(_ms[i]) if _ms is not None and i < len(_ms) else 0.0
+                mrs_rcvr = bool(_rc[i]) if _rc is not None and i < len(_rc) else False
                 data.append({
                     "symbol": sym,
                     "ltp": float(r['ltp']),
                     "p1d": f"{ch_pct:.2f}%",
                     "chg_up": ch_pct > 0,
                     "chg_down": ch_pct < 0,
-                    "mrs": float(r['mrs']),
-                    "mrs_str": f"{r['mrs']:.2f}",
+                    "mrs": mrs_v,
+                    "mrs_str": f"{mrs_v:.2f}",
                     "mrs_prev": float(r['mrs_prev']),
-                    "mrs_up": bool(r['mrs'] >= 0),
+                    "mrs_up": bool(mrs_v >= 0),
                     "mrs_daily": float(r['mrs_daily']),
                     "mrs_daily_str": f"{r['mrs_daily']:+.2f}",
                     "mrs_daily_up": bool(r['mrs_daily'] >= 0),
                     "rs_rating": int(r['rs_rating']),
                     "status": st,
                     "profile": pf if pf.strip() else "—",
-                    "rv": f"{float(r['rv']):.2f}x",
+                    "rv": f"{rv_v:.2f}x",
+                    "rv_num": rv_v,
                     "price_up": bool(r['price_up']),
                     "price_down": bool(r['price_down']),
-                    "rv_up": bool(float(r["rv"]) >= 1.5),
-                    "rv_down": bool(float(r["rv"]) >= 1.5 and ch_pct < 0),
+                    "rv_up": bool(rv_v >= 1.5),
+                    "rv_down": bool(rv_v >= 1.5 and ch_pct < 0),
+                    "mrs_slope_4w": slope4,
+                    "mrs_mansfield_slope": m_slope,
+                    "mrs_rcvr": mrs_rcvr,
+                    "mrs_rcvr_str": "↑<0" if mrs_rcvr else "—",
                 })
+
+            rcvr_f = str(filters.get("mrs_rcvr", "ALL")).strip().upper()
+            if rcvr_f in ("YES", "1", "TRUE", "ON", "BELOW0", "BELOW0_RISING"):
+                data = [d for d in data if d.get("mrs_rcvr")]
 
             # Layer 3: pivot from live_state (written by BreakoutScanner / sidecar), not SHM dtype
             try:
@@ -624,8 +747,27 @@ class MasterScanner:
                     d["mrs_prev_day"] = None
                     d["mrs_prev_day_str"] = "—"
             
-            # Simple sorting by RS Rating (Sovereign requirement)
-            data.sort(key=lambda x: x['rs_rating'], reverse=True)
+            sort_key = str(filters.get("sort_key") or "rs_rating").strip().lower()
+            sort_desc = bool(filters.get("sort_desc", True))
+
+            def _sort_key(row):
+                if sort_key in ("rs", "rs_rating", "rt"):
+                    return int(row["rs_rating"])
+                if sort_key in ("mrs", "wmrs", "w_mrs"):
+                    return float(row["mrs"])
+                if sort_key in ("dmrs", "d_mrs", "mrs_daily"):
+                    return float(row["mrs_daily"])
+                if sort_key in ("rv", "rvol"):
+                    return float(row.get("rv_num", 0.0))
+                if sort_key in ("sym", "symbol", "ticker"):
+                    return str(row["symbol"])
+                if sort_key in ("st", "status"):
+                    return str(row["status"])
+                if sort_key in ("prf", "profile"):
+                    return str(row["profile"])
+                return int(row["rs_rating"])
+
+            data.sort(key=_sort_key, reverse=sort_desc)
             
             # Step 5: Final Dictionary Delivery (Sovereign Alignment)
             start = (page - 1) * page_size
@@ -685,6 +827,11 @@ class MasterScanner:
             if new_bench:
                 logger.info(f"🔄 Switching Benchmark to: {new_bench}")
                 self.math.set_benchmark(new_bench)
+                # Refresh weekly mRS, OLS slope, and RCVR immediately (otherwise stale until 60s flush)
+                try:
+                    self.math.calculate_rs()
+                except Exception as ex:
+                    logger.warning("calculate_rs after benchmark switch: %s", ex)
             
             return True
         except Exception as e:
@@ -834,6 +981,18 @@ class MasterScanner:
                 except Exception as e:
                     logger.error("Fyers subscribe batch %s-%s failed: %s", i, i + len(batch), e)
                     raise ConnectionError(f"Fyers subscribe batch failed: {e}") from e
+                # Wait for token map to reflect this batch; if it stalls, back off a bit.
+                t0 = time.time()
+                prev_n = len(getattr(self.ws, "symbol_token", {}) or {})
+                # Keep the per-batch wait bounded to avoid blocking forever on SDK quirks.
+                # This helps with the observed "partial mapping" cases where hammering subscribe()
+                # too quickly results in low token coverage.
+                max_wait = float(os.getenv("FYERS_WS_SUB_CONFIRM_TIMEOUT_SEC", "3.5"))
+                while time.time() - t0 < max_wait:
+                    cur_n = len(getattr(self.ws, "symbol_token", {}) or {})
+                    if cur_n > prev_n:
+                        break
+                    time.sleep(0.15)
                 time.sleep(_sub_sleep)
             tok_map = getattr(self.ws, "symbol_token", {}) or {}
             _n_tok = len(tok_map)
@@ -1056,7 +1215,8 @@ class MasterScanner:
                     import traceback; traceback.print_exc()
                 self._log_tick_health()
                 self._maybe_resubscribe_unresolved_symbols()
-                
+                self._maybe_resubscribe_stale_symbols()
+
                 time.sleep(5)
         except ConnectionError:
             raise
@@ -1190,8 +1350,19 @@ class MasterScanner:
             print("⚠️ [Scanner] Memory Persistence Aborted: No valid symbols found in SHM segment.", flush=True)
             return
 
+        # Deduplicate by symbol before ON CONFLICT batch upsert.
+        # Scanning full SHM can include mirror slots (e.g., benchmark aliases), and Postgres rejects
+        # duplicate conflict keys inside a single INSERT ... ON CONFLICT statement.
+        rec_map = {}
+        for row in recs:
+            rec_map[row[0]] = row
+        dup_n = len(recs) - len(rec_map)
+        recs = sorted(rec_map.values(), key=lambda t: t[0])
+        if dup_n > 0:
+            print(f"⚠️ [Master] Deduped {dup_n} duplicate live_state symbols before upsert.", flush=True)
         print(f"💾 [Master] Syncing Universal World: {len(recs)} symbols -> Postgres...", flush=True)
-        
+
+        self.db.ensure_live_state_table()
         q = """
             INSERT INTO live_state (symbol, last_price, mrs, rs_rating, status) 
             VALUES %s 
@@ -1202,13 +1373,25 @@ class MasterScanner:
                 status = EXCLUDED.status
         """
         print("💡 [DB] Acquiring Postgres Connection...", flush=True)
-        with self.db.get_connection() as conn:
-            print("💡 [DB] Connection acquired. Executing Values...", flush=True)
-            with conn.cursor() as cur: 
-                execute_values(cur, q, recs)
-                print("💡 [DB] Execution complete. Committing...", flush=True)
-                conn.commit()
-                print("✅ [DB] Commit successful.", flush=True)
+        for attempt in range(5):
+            try:
+                with self.db.get_connection() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            acquire_live_state_xact_lock(cur)
+                            execute_values(cur, q, recs)
+                        conn.commit()
+                        print("✅ [DB] Commit successful.", flush=True)
+                        return
+                    except Exception:
+                        conn.rollback()
+                        raise
+            except Exception as e:
+                if _is_deadlock_exception(e) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                print(f"❌ [DB] persist_to_postgres failed: {e}", flush=True)
+                return
 
 if __name__ == "__main__":
     try:

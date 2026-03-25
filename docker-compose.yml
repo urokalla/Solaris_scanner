@@ -52,6 +52,10 @@ services:
       # EOD: append today’s 1D bar after NSE close (Mon–Fri), default first run after 15:45 IST
       - EOD_SYNC_IST_HOUR=15
       - EOD_SYNC_IST_MINUTE=45
+      # monthly_rsi2_lt2_snapshot: run weekdays after this IST time (default 15:00 = ~pre-close)
+      - MONTHLY_RSI2_SNAPSHOT_ENABLED=${MONTHLY_RSI2_SNAPSHOT_ENABLED:-1}
+      - MONTHLY_RSI2_SNAPSHOT_IST_HOUR=${MONTHLY_RSI2_SNAPSHOT_IST_HOUR:-15}
+      - MONTHLY_RSI2_SNAPSHOT_IST_MINUTE=${MONTHLY_RSI2_SNAPSHOT_IST_MINUTE:-0}
       - PIPELINE_DATA_DIR=/app/data/historical
       - BACKFILL_IST_HOUR=1
       - BACKFILL_IST_MINUTE=0

@@ -42,4 +42,29 @@ class Settings:
     UDAI_ACCOUNT_EQUITY = float(os.getenv("UDAI_ACCOUNT_EQUITY", "1000000"))
     UDAI_REFRESH_SEC = float(os.getenv("UDAI_REFRESH_SEC", "60"))
 
+    # Monthly Wilder RSI(2) on month-end closes: sidecar column blends live LTP into “today” from this IST time (weekdays only).
+    SIDECAR_M_RSI2 = os.getenv("SIDECAR_M_RSI2", "1").strip().lower() in ("1", "true", "yes")
+    SIDECAR_M_RSI2_REFRESH_SEC = float(os.getenv("SIDECAR_M_RSI2_REFRESH_SEC", "60"))
+    SIDECAR_M_RSI2_LIVE_IST_HOUR = int(os.getenv("SIDECAR_M_RSI2_LIVE_IST_HOUR", "14"))
+    SIDECAR_M_RSI2_LIVE_IST_MINUTE = int(os.getenv("SIDECAR_M_RSI2_LIVE_IST_MINUTE", "45"))
+
+    # Daily "pre-thrust" indicators (your missing setup bucket):
+    # Computed from yesterday's daily OHLCV in Parquet / PipelineBridge history,
+    # and persisted so you can check at a fixed IST time (default 14:30).
+    SIDECAR_PRE_THRUST_ENABLED = os.getenv("SIDECAR_PRE_THRUST_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+    SIDECAR_PRE_THRUST_IST_HOUR = int(os.getenv("SIDECAR_PRE_THRUST_IST_HOUR", "14"))
+    SIDECAR_PRE_THRUST_IST_MINUTE = int(os.getenv("SIDECAR_PRE_THRUST_IST_MINUTE", "30"))
+
+    # Thresholds for yesterday features
+    SIDECAR_PRE_THRUST_Y_VOL_X20_MIN = float(os.getenv("SIDECAR_PRE_THRUST_Y_VOL_X20_MIN", "2.0"))
+    SIDECAR_PRE_THRUST_Y_RNG_ATR14_MIN = float(os.getenv("SIDECAR_PRE_THRUST_Y_RNG_ATR14_MIN", "1.5"))
+    SIDECAR_PRE_THRUST_SCORE_MIN = int(os.getenv("SIDECAR_PRE_THRUST_SCORE_MIN", "6"))
+
+    # Multi-year window for "near highs"
+    SIDECAR_PRE_THRUST_MULTIYEAR_YEARS = int(os.getenv("SIDECAR_PRE_THRUST_MULTIYEAR_YEARS", "3"))
+
+    # Only run the analysis for symbols currently moving big (live change_pct from SHM).
+    SIDECAR_PRE_THRUST_LIVE_CHG_PCT_MIN = float(os.getenv("SIDECAR_PRE_THRUST_LIVE_CHG_PCT_MIN", "10.0"))
+    SIDECAR_PRE_THRUST_MAX_MOVERS = int(os.getenv("SIDECAR_PRE_THRUST_MAX_MOVERS", "30"))
+
 settings = Settings()

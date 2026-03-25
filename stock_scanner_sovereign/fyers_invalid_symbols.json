@@ -1,6 +1,13 @@
 {
   "symbols": [
+    "NSE:CLEDUCATE-EQ",
+    "NSE:DCMFINSERV-EQ",
     "NSE:DCMSIL-EQ",
+    "NSE:ICDSLTD-EQ",
+    "NSE:MAHASTEEL-EQ",
+    "NSE:SHANKARA-EQ",
+    "NSE:SIGMAADV-EQ",
+    "NSE:TIRUPATIFL-EQ",
     "NSE:UMESLTD-EQ",
     "NSE:VIJIFIN-EQ"
   ]

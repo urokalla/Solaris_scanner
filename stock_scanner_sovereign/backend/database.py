@@ -1,4 +1,4 @@
-import os, psycopg2, numpy as np, logging
+import os, time, psycopg2, numpy as np, logging
 from utils.constants import UNIVERSE_ID_BY_DISPLAY
 
 logger = logging.getLogger(__name__)
@@ -6,6 +6,32 @@ from psycopg2.extras import execute_values
 from psycopg2.pool import ThreadedConnectionPool
 from datetime import datetime
 from contextlib import contextmanager
+
+
+# Serialize writers to live_state (master persist + sidecar brk_lvl + EOD snapshot) — avoids PK/index deadlocks.
+LIVE_STATE_XACT_LOCK_KEY = 902451837261
+
+
+def acquire_live_state_xact_lock(cursor) -> None:
+    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (LIVE_STATE_XACT_LOCK_KEY,))
+
+
+def _is_deadlock_exception(exc: BaseException) -> bool:
+    try:
+        from psycopg2 import errorcodes
+
+        if getattr(exc, "pgcode", None) == errorcodes.DEADLOCK_DETECTED:
+            return True
+    except Exception:
+        pass
+    try:
+        from psycopg2 import errors as pg_errors
+
+        if isinstance(exc, pg_errors.DeadlockDetected):
+            return True
+    except Exception:
+        pass
+    return "deadlock" in str(exc).lower()
 
 class DatabaseManager:
     _pool = None
@@ -86,11 +112,37 @@ class DatabaseManager:
                 conn.commit()
                 logger.info(f"💾 [Database] Successfully persisted {len(data)} RS ratings for {today}.")
 
+    def ensure_live_state_table(self):
+        """
+        Create live_state if it does not exist (fresh Postgres / new env).
+        MasterScanner.persist_to_postgres and sidecar upsert_brk_lvls both require this table.
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS live_state (
+                            symbol VARCHAR(96) PRIMARY KEY,
+                            last_price DOUBLE PRECISION,
+                            mrs DOUBLE PRECISION,
+                            rs_rating INTEGER,
+                            status TEXT,
+                            brk_lvl DOUBLE PRECISION,
+                            mrs_prev_day DOUBLE PRECISION
+                        )
+                        """
+                    )
+                    conn.commit()
+        except Exception as e:
+            logger.warning("Database: ensure_live_state_table: %s", e)
+
     def ensure_live_state_brk_column(self):
         """Align Layer 3 live_state with sidecar: pivot breakout level (see docs/architecture_data_layers.md)."""
         if DatabaseManager._brk_lvl_column_checked:
             return
         try:
+            self.ensure_live_state_table()
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -111,20 +163,34 @@ class DatabaseManager:
         """rows: list of (symbol, brk_lvl). Single upsert path; existing live_state rows get brk_lvl updated."""
         if not rows:
             return
-        try:
-            with self.get_connection() as conn:
-                with conn.cursor() as cur:
-                    execute_values(
-                        cur,
-                        """
-                        INSERT INTO live_state (symbol, brk_lvl) VALUES %s
-                        ON CONFLICT (symbol) DO UPDATE SET brk_lvl = EXCLUDED.brk_lvl
-                        """,
-                        [(s, float(b)) for s, b in rows],
-                    )
-                    conn.commit()
-        except Exception as e:
-            logger.error("Database: upsert_brk_lvls failed: %s", e, exc_info=True)
+        self.ensure_live_state_table()
+        # Stable row lock order vs master persist_to_postgres avoids many deadlocks on live_state PK.
+        payload = sorted(((s, float(b)) for s, b in rows), key=lambda x: x[0])
+        for attempt in range(5):
+            try:
+                with self.get_connection() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            acquire_live_state_xact_lock(cur)
+                            execute_values(
+                                cur,
+                                """
+                                INSERT INTO live_state (symbol, brk_lvl) VALUES %s
+                                ON CONFLICT (symbol) DO UPDATE SET brk_lvl = EXCLUDED.brk_lvl
+                                """,
+                                payload,
+                            )
+                        conn.commit()
+                        return
+                    except Exception:
+                        conn.rollback()
+                        raise
+            except Exception as e:
+                if _is_deadlock_exception(e) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                logger.error("Database: upsert_brk_lvls failed: %s", e, exc_info=True)
+                return
 
     def get_brk_lvl_map(self, symbols):
         """Return {symbol: brk_lvl} for UI hydration when in-memory sidecar row has no pivot yet."""
@@ -148,6 +214,7 @@ class DatabaseManager:
         if DatabaseManager._mrs_prev_day_column_checked:
             return
         try:
+            self.ensure_live_state_table()
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -187,9 +254,115 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
+                    acquire_live_state_xact_lock(cur)
                     cur.execute("UPDATE live_state SET mrs_prev_day = mrs WHERE mrs IS NOT NULL")
                     n = cur.rowcount
                     conn.commit()
                 logger.info("Database: EOD snapshot mrs_prev_day <- mrs (%s rows)", n)
         except Exception as e:
             logger.error("Database: snapshot_mrs_prev_day_from_current_mrs failed: %s", e, exc_info=True)
+
+    _pre_thrust_table_checked = False
+
+    def ensure_pre_thrust_table(self) -> None:
+        """
+        Daily snapshot table for your "pre-thrust" bucket (yesterday clues).
+        Written by sidecar around 14:30 IST so you can check quickly.
+        """
+        if DatabaseManager._pre_thrust_table_checked:
+            return
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS pre_thrust_watchlist (
+                            symbol VARCHAR(96),
+                            run_date DATE,
+                            y_date DATE,
+                            y_vol_x20 DOUBLE PRECISION,
+                            y_rng_x_atr14 DOUBLE PRECISION,
+                            y_compress_10d INTEGER,
+                            y_compress_20d INTEGER,
+                            y_near_20d_high INTEGER,
+                            y_near_52w_high INTEGER,
+                            y_near_multiy_high INTEGER,
+                            y_score INTEGER,
+                            y_label TEXT,
+                            PRIMARY KEY(symbol, run_date)
+                        )
+                        """
+                    )
+                    conn.commit()
+            DatabaseManager._pre_thrust_table_checked = True
+        except Exception as e:
+            logger.warning("Database: ensure_pre_thrust_table failed: %s", e)
+
+    def upsert_pre_thrust_watchlist(self, rows: list[tuple]) -> None:
+        """
+        rows:
+          (symbol, run_date, y_date, y_vol_x20, y_rng_x_atr14,
+           y_compress_10d, y_compress_20d,
+           y_near_20d_high, y_near_52w_high, y_near_multiy_high,
+           y_score, y_label)
+        """
+        if not rows:
+            return
+        self.ensure_pre_thrust_table()
+        payload = []
+        for r in rows:
+            if not r:
+                continue
+            # Ensure bools become ints for Postgres.
+            symbol = str(r[0])
+            payload.append(
+                (
+                    symbol,
+                    r[1],
+                    r[2],
+                    float(r[3]) if r[3] is not None and np.isfinite(r[3]) else None,
+                    float(r[4]) if r[4] is not None and np.isfinite(r[4]) else None,
+                    int(r[5]) if r[5] is not None else 0,
+                    int(r[6]) if r[6] is not None else 0,
+                    int(r[7]) if r[7] is not None else 0,
+                    int(r[8]) if r[8] is not None else 0,
+                    int(r[9]) if r[9] is not None else 0,
+                    int(r[10]) if r[10] is not None else 0,
+                    str(r[11]) if r[11] is not None else None,
+                )
+            )
+        q = """
+            INSERT INTO pre_thrust_watchlist (
+                symbol, run_date, y_date, y_vol_x20, y_rng_x_atr14,
+                y_compress_10d, y_compress_20d,
+                y_near_20d_high, y_near_52w_high, y_near_multiy_high,
+                y_score, y_label
+            )
+            VALUES %s
+            ON CONFLICT (symbol, run_date) DO UPDATE SET
+                y_date = EXCLUDED.y_date,
+                y_vol_x20 = EXCLUDED.y_vol_x20,
+                y_rng_x_atr14 = EXCLUDED.y_rng_x_atr14,
+                y_compress_10d = EXCLUDED.y_compress_10d,
+                y_compress_20d = EXCLUDED.y_compress_20d,
+                y_near_20d_high = EXCLUDED.y_near_20d_high,
+                y_near_52w_high = EXCLUDED.y_near_52w_high,
+                y_near_multiy_high = EXCLUDED.y_near_multiy_high,
+                y_score = EXCLUDED.y_score,
+                y_label = EXCLUDED.y_label
+        """
+        for attempt in range(5):
+            try:
+                with self.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        acquire_live_state_xact_lock(cur)
+                        execute_values(cur, q, payload)
+                    conn.commit()
+                    return
+            except Exception as e:
+                if _is_deadlock_exception(e) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                logger.error("Database: upsert_pre_thrust_watchlist failed: %s", e, exc_info=True)
+                return
+

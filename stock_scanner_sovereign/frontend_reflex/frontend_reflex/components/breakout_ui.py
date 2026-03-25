@@ -23,6 +23,7 @@ def breakout_header():
     )
 def breakout_sidebar():
     options = ["Nifty 50", "Nifty 100", "Nifty 500", "All NSE Stocks"]
+    preset_options = ["ALL", "EARLY", "RETEST", "STRONG_RETEST", "FAST20", "HIGH10", "HIGH10_LITE", "BUYNOW_CROSS", "BREAKOUT", "STAGE 2"]
     brk_options = [
         "ALL",
         "BUY NOW",
@@ -32,6 +33,7 @@ def breakout_sidebar():
         "STAGE 4",
         "N.A.",
     ]
+    mrs_grid_options = ["ALL", "BUY NOW", "TRENDING", "NOT TRENDING"]
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
         rx.vstack(
@@ -47,6 +49,21 @@ def breakout_sidebar():
         rx.box(height="8px"),
         rx.text("FILTERS", size="1", color="#D1D1D1", font_weight="bold", padding="8px 15px 4px 15px"),
         rx.vstack(
+            rx.text("Preset", size="1", color="#888888", padding_left="15px"),
+            rx.select(
+                preset_options,
+                value=BreakoutState.preset_mode,
+                on_change=BreakoutState.set_preset_mode,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                margin_left="15px",
+                margin_right="15px",
+                height="32px",
+            ),
             rx.text("Symbol contains", size="1", color="#888888", padding_left="15px"),
             rx.input(
                 placeholder="e.g. RELIANCE",
@@ -77,6 +94,49 @@ def breakout_sidebar():
                 margin_left="15px",
                 margin_right="15px",
                 height="32px",
+            ),
+            rx.text("MRS STATUS (weekly)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+            rx.select(
+                mrs_grid_options,
+                value=BreakoutState.filter_mrs_grid,
+                on_change=BreakoutState.set_filter_mrs_grid,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                margin_left="15px",
+                margin_right="15px",
+                height="32px",
+            ),
+            rx.text("Mn RSI2 (month-end)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+            rx.select(
+                ["ALL", "LT2"],
+                value=BreakoutState.filter_m_rsi2,
+                on_change=BreakoutState.set_filter_m_rsi2,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                margin_left="15px",
+                margin_right="15px",
+                height="32px",
+            ),
+            rx.button(
+                "EXPORT XLSX",
+                on_click=BreakoutState.download_excel,
+                size="1",
+                margin_left="15px",
+                margin_right="15px",
+                margin_top="10px",
+                width="calc(100% - 30px)",
+                bg="#00FF00",
+                color="black",
+                font_weight="bold",
+                _hover={"bg": "#00CC00"},
             ),
             spacing="1",
             width="100%",

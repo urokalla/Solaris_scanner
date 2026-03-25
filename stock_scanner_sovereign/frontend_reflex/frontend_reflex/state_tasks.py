@@ -4,8 +4,18 @@ async def poll_results_handler(self):
     while True:
         await asyncio.sleep(2.5)
         async with self:
-            filters = {"universe": self.universe, "benchmark": self.benchmark, "search": self.search_query, 
-                       "profile": self.filter_profile, "status": self.filter_status, "mrs_min": self.filter_mrs, "rv_min": self.filter_rv}
+            filters = {
+                "universe": self.universe,
+                "benchmark": self.benchmark,
+                "search": self.search_query,
+                "profile": self.filter_profile,
+                "status": self.filter_status,
+                "mrs_min": self.filter_mrs,
+                "rv_min": self.filter_rv,
+                "mrs_rcvr": self.filter_mrs_rcvr,
+                "sort_key": self.grid_sort_key,
+                "sort_desc": self.grid_sort_desc,
+            }
             view = get_scanner().get_ui_view(filters=filters, page=self.current_page, page_size=self.page_size)
             self.scanner_results = view.get("results", [])
             self.alpha_signals = view.get("pulse", [])

@@ -10,6 +10,9 @@ async def poll_sidecar_handler(self):
                 page_size=self.page_size,
                 search=self.search_query,
                 brk_stage=self.filter_brk_stage,
+                filter_mrs_grid=self.filter_mrs_grid,
+                filter_m_rsi2=self.filter_m_rsi2,
+                preset=self.preset_mode,
                 sort_key=self.sort_sidecar_key,
                 sort_desc=self.sort_sidecar_desc,
             )
