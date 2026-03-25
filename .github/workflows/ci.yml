@@ -1,0 +1,38 @@
+# Free for public repos on GitHub-hosted runners.
+# Private repos use included Actions minutes (see GitHub billing docs).
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-compose-and-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # docker-compose references these paths; they are usually gitignored locally.
+      - name: Stub local-only files for compose validation
+        run: |
+          mkdir -p stock_scanner_sovereign
+          if [ ! -f stock_scanner_sovereign/.env ]; then
+            printf '%s\n' 'DB_HOST=localhost' 'DB_USER=ci' 'DB_PASSWORD=ci' 'DB_NAME=ci' 'DB_PORT=5432' > stock_scanner_sovereign/.env
+          fi
+          if [ ! -f stock_scanner_sovereign/access_token.txt ]; then
+            printf 'ci-stub-token\n' > stock_scanner_sovereign/access_token.txt
+          fi
+
+      - name: Validate docker compose file
+        run: docker compose -f docker-compose.yml config --quiet
+
+      # Fast sanity check: only the pipeline image (Python slim + pip).
+      # Scanner/dashboard image is heavier (Bun/reflex); add a separate job if you want it in CI.
+      - name: Build pipeline image
+        run: docker compose -f docker-compose.yml build pipeline
