@@ -1,4 +1,4 @@
-# Fyers Stock Scanner Dashboard
+# Udai Stocks Scanner Dashboard
 
 A real-time, read-only stock scanner dashboard that monitors indices and applies custom logic using Fyers API.
 
