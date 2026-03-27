@@ -91,6 +91,12 @@ def _sidecar_preset_keep(d: dict, preset_norm: str) -> bool:
         return bool(d.get("is_breakout")) or st_raw == "BREAKOUT"
     if preset_norm == "STAGE_2":
         return st_raw == "STAGE 2"
+    if preset_norm == "STAGE1_EARLY":
+        return st_raw == "STAGE 1" or (mrs < 0 and bool(d.get("mrs_rcvr", False)))
+    if preset_norm == "STAGE2_TRIGGER":
+        return (mrs > 0) and st_raw in ("BUY NOW", "NEAR BRK", "STAGE 2")
+    if preset_norm == "STAGE3_CONFIRMED":
+        return bool(d.get("is_breakout")) or st_raw == "BREAKOUT"
     if preset_norm == "EARLY":
         return mrs > 0 and st_raw in ("NEAR BRK", "STAGE 2")
     if preset_norm == "RETEST":

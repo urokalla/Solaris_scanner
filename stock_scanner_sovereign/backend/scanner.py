@@ -8,6 +8,7 @@ from backend.database import DatabaseManager, _is_deadlock_exception, acquire_li
 from backend.scanner_shm import SHMBridge
 from backend.scanner_math import RSMathEngine
 from utils.scanner_analysis import compute_trading_profile, profile_label_to_shm
+from utils.constants import BENCHMARK_MAP
 from psycopg2.extras import execute_values
 
 # Environment-Agnostic Logging (Relative to script location)
@@ -28,6 +29,47 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("MasterScanner")
+
+
+def _patch_fyers_ws_safe_send():
+    """
+    fyers_apiv3 queues outbound frames in __process_message_queue, but __send_message only checks
+    that __ws_object is non-None — not that the TCP/WebSocket session is still open. A close
+    race raises WebSocketConnectionClosedException and kills the queue thread until process restart.
+    """
+    try:
+        from websocket._exceptions import WebSocketConnectionClosedException
+    except ImportError:
+        try:
+            from websocket import WebSocketConnectionClosedException  # type: ignore
+        except ImportError:
+            logger.warning("websocket-client exception types not found; Fyers send-patch skipped.")
+            return
+    cls = data_ws.FyersDataSocket
+    if getattr(cls, "_sovereign_safe_send_patched", False):
+        return
+    orig = getattr(cls, "_FyersDataSocket__send_message", None)
+    if not callable(orig):
+        logger.warning("FyersDataSocket.__send_message not found; send-patch skipped.")
+        return
+
+    def safe_send(self, message):
+        try:
+            return orig(self, message)
+        except WebSocketConnectionClosedException:
+            logger.warning(
+                "Fyers WS: dropped outbound message — connection already closed "
+                "(SDK thread race). Scanner replay / reconnect will recover."
+            )
+        except BrokenPipeError:
+            logger.warning("Fyers WS: dropped outbound message — broken pipe.")
+
+    setattr(cls, "_FyersDataSocket__send_message", safe_send)
+    cls._sovereign_safe_send_patched = True
+    logger.info("Applied FyersDataSocket closed-socket send guard (queue thread safety).")
+
+
+_patch_fyers_ws_safe_send()
 
 
 def _tick_session_volume(m) -> float:
@@ -82,7 +124,6 @@ else:
 
 class MasterScanner:
     def __init__(self):
-        from utils.constants import BENCHMARK_MAP
         from utils.symbols import get_nifty_symbols # Added import
         self.db, self.shm = DatabaseManager(), SHMBridge()
         try:
@@ -119,9 +160,18 @@ class MasterScanner:
                     logger.warning("No active symbols found in DB or benchmarks. Using NIFTY50 as fallback.")
                     raw_symbols_set.add("NSE:NIFTY50-INDEX")
                 
-                # Step 2: Synchronized Universe (No smart filters, just pure loading)
-                self.symbols = sorted(list(raw_symbols_set))[:5000]
-                logger.info(f"🌌 [Master] Architecture LOAD: {len(self.symbols)} securities synchronized.")
+                # Step 2: Synchronized Universe — never truncate index benchmarks (sorted [:5000] alone
+                # drops NIFTY50/NIFTY500 etc. when thousands of EQ names sort earlier alphabetically).
+                _bset = set(BENCHMARK_MAP.values())
+                _bench_first = sorted(_bset & raw_symbols_set)
+                _rest = sorted(raw_symbols_set - set(_bench_first))
+                _cap = 5000
+                _room = max(0, _cap - len(_bench_first))
+                self.symbols = _bench_first + _rest[:_room]
+                logger.info(
+                    f"🌌 [Master] Architecture LOAD: {len(self.symbols)} securities synchronized "
+                    f"(benchmark indices reserved: {len(_bench_first)})."
+                )
                 
                 # Step 3: Initialize Physical Segments (Master Only)
                 # 30-Year Rule: Slaves must NEVER overwrite the Master's index map.
@@ -140,6 +190,12 @@ class MasterScanner:
         
         # Step 5: Final Intelligence Engine Attachment
         self.math = RSMathEngine(self.symbols, bench_sym="NSE:NIFTY50-INDEX")
+        if self.math.bench_sym not in self.symbols:
+            logger.error(
+                "Benchmark %s is missing from the master symbol list — live RS and header index ticks will fail. "
+                "Increase FYERS cap or check DB/benchmark merge.",
+                self.math.bench_sym,
+            )
         self.last_flush = 0
         self.ws = None
         # Master-only: session BUY NOW latch + prior-day mRS cache (dashboard reads SHM written by master)
@@ -152,6 +208,11 @@ class MasterScanner:
         self._last_tick_seen_ts: float = 0.0
         self._last_targeted_resub_ts: float = 0.0
         self._last_stale_resub_ts: float = 0.0
+        # Per-symbol stale resub cooldown to avoid hammering the same illiquid names.
+        self._stale_resub_sym_ts: dict[str, float] = {}
+        # Last successful full WS subscribe list (Fyers SDK clears symbol_token on reconnect without resubscribing).
+        self._ws_full_subscribe_targets: Optional[list[str]] = None
+        self._last_full_ws_replay_ts: float = 0.0
         self._invalid_ws_symbols_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "fyers_invalid_symbols.json")
         )
@@ -259,15 +320,46 @@ class MasterScanner:
             if expect <= 0:
                 return
             tok_map = getattr(self.ws, "symbol_token", {}) or {}
-            resolved = self._resolved_symbols_from_token_map(tok_map)
-            unresolved = [s for s in target if str(s).upper() not in resolved] if resolved else []
+            if not tok_map:
+                # Empty map after SDK reconnect: `if resolved` was falsy so we used [] and never resubscribed.
+                unresolved = list(target)
+            else:
+                resolved = self._resolved_symbols_from_token_map(tok_map)
+                unresolved = [s for s in target if str(s).upper() not in resolved]
+            # Token-map shape/SDK quirks can miss symbols that are already ticking; re-subscribing
+            # those causes unnecessary churn and can destabilize the session.
+            hb_grace = float(os.getenv("FYERS_WS_TARGETED_SKIP_IF_HB_SEC", "90"))
+            if tok_map and unresolved and hb_grace > 0:
+                filtered = []
+                for s in unresolved:
+                    idx = self._resolve_tick_idx(s)
+                    if idx is None:
+                        filtered.append(s)
+                        continue
+                    try:
+                        hb = float(self.shm.arr[idx]["heartbeat"])
+                    except Exception:
+                        hb = 0.0
+                    if hb > 0 and (now - hb) <= hb_grace:
+                        continue
+                    filtered.append(s)
+                unresolved = filtered
             self._save_unresolved_ws_symbols(unresolved, len(tok_map), expect)
             if not unresolved:
                 return
 
-            max_retry = max(20, min(300, int(os.getenv("FYERS_WS_TARGETED_RESUB_MAX", "120"))))
-            batch = max(5, min(40, int(os.getenv("FYERS_WS_TARGETED_RESUB_BATCH", "20"))))
-            retry_syms = unresolved[:max_retry]
+            if not tok_map:
+                batch = max(50, min(500, int(os.getenv("FYERS_WS_SUB_BATCH", "200"))))
+                retry_syms = unresolved
+                logger.warning(
+                    "🛟 [Resub] symbol_token empty — replaying full subscribe (%s symbols, batch=%s)",
+                    len(retry_syms),
+                    batch,
+                )
+            else:
+                max_retry = max(20, min(300, int(os.getenv("FYERS_WS_TARGETED_RESUB_MAX", "120"))))
+                batch = max(5, min(40, int(os.getenv("FYERS_WS_TARGETED_RESUB_BATCH", "20"))))
+                retry_syms = unresolved[:max_retry]
             for i in range(0, len(retry_syms), batch):
                 b = retry_syms[i : i + batch]
                 try:
@@ -294,16 +386,17 @@ class MasterScanner:
             if os.getenv("FYERS_WS_STALE_RESUB_ENABLE", "true").lower() not in ("1", "true", "yes"):
                 return
             now = time.time()
-            cooldown = float(os.getenv("FYERS_WS_STALE_RESUB_COOLDOWN_SEC", "55"))
+            cooldown = float(os.getenv("FYERS_WS_STALE_RESUB_COOLDOWN_SEC", "180"))
             if (now - self._last_stale_resub_ts) < cooldown:
                 return
             feed_fresh = float(os.getenv("FYERS_WS_STALE_RESUB_FEED_FRESH_SEC", "120"))
             if self._last_tick_seen_ts <= 0 or (now - self._last_tick_seen_ts) > feed_fresh:
                 return
             base_stale = float(os.getenv("SCANNER_STALE_HEARTBEAT_SEC", "120"))
-            min_stale = float(
-                os.getenv("FYERS_WS_STALE_RESUB_MIN_SEC", str(max(180.0, base_stale + 60.0)))
-            )
+            # Illiquid names often go many minutes without a trade; default well above that so we
+            # only resubscribe when a stream likely dropped, not when the stock is quiet.
+            _default_min = max(480.0, base_stale * 3.0, base_stale + 300.0)
+            min_stale = float(os.getenv("FYERS_WS_STALE_RESUB_MIN_SEC", str(_default_min)))
             n_sym = min(len(self.symbols), len(self.shm.arr))
             if n_sym <= 0:
                 return
@@ -321,7 +414,7 @@ class MasterScanner:
             # (common when many symbols don't tick frequently), re-subscribing can disrupt
             # the feed without improving coverage.
             stale_ratio = float(len(stale_idx)) / float(max(n_sym, 1))
-            max_ratio = float(os.getenv("FYERS_WS_STALE_RESUB_MAX_STALE_RATIO", "0.25"))
+            max_ratio = float(os.getenv("FYERS_WS_STALE_RESUB_MAX_STALE_RATIO", "0.12"))
             if stale_ratio >= max_ratio:
                 logger.info(
                     "⏸️ [ResubStale] Skip: too many stale symbols (stale=%s/%s ratio=%.2f >= %.2f)",
@@ -333,13 +426,31 @@ class MasterScanner:
                 return
             self._load_invalid_ws_symbols()
             blocked = set(self._invalid_ws_symbols)
+            tok_map = getattr(self.ws, "symbol_token", {}) or {}
+            token_resolved = self._resolved_symbols_from_token_map(tok_map)
+            sym_cooldown = float(os.getenv("FYERS_WS_STALE_RESUB_PER_SYMBOL_SEC", "900"))
+            prune_before = now - max(sym_cooldown * 4.0, 3600.0)
+            try:
+                dead = {k for k, t in self._stale_resub_sym_ts.items() if t < prune_before}
+                for k in dead:
+                    self._stale_resub_sym_ts.pop(k, None)
+            except Exception:
+                pass
             _ws_dtype = os.getenv("FYERS_WS_DATA_TYPE", "SymbolUpdate")
             fyers_syms: list[str] = []
             for i in stale_idx:
                 s = self.symbols[i]
                 fy = self._to_fyers_symbol(f"NSE:{s}-EQ" if ":" not in str(s) else s)
-                if str(fy).upper() not in blocked:
-                    fyers_syms.append(fy)
+                fyu = str(fy).upper()
+                if fyu in blocked:
+                    continue
+                # Quiet stocks: no token row and stale HB — ok to try subscribe. If we have a token
+                # but no ticks, only resub after per-symbol cooldown (likely illiquid otherwise).
+                if token_resolved and fyu in token_resolved and sym_cooldown > 0:
+                    last = float(self._stale_resub_sym_ts.get(fyu, 0.0))
+                    if last > 0 and (now - last) < sym_cooldown:
+                        continue
+                fyers_syms.append(fy)
             if not fyers_syms:
                 return
             # Dedupe preserve order
@@ -350,7 +461,7 @@ class MasterScanner:
                 if u not in seen:
                     seen.add(u)
                     deduped.append(x)
-            cap = max(10, min(500, int(os.getenv("FYERS_WS_STALE_RESUB_MAX", "250"))))
+            cap = max(10, min(500, int(os.getenv("FYERS_WS_STALE_RESUB_MAX", "80"))))
             to_sub = deduped[:cap]
             batch = max(10, min(80, int(os.getenv("FYERS_WS_STALE_RESUB_BATCH", "40"))))
             bsleep = float(os.getenv("FYERS_WS_STALE_RESUB_BATCH_SLEEP", "0.25"))
@@ -361,6 +472,8 @@ class MasterScanner:
                     self.ws.subscribe(symbols=b, data_type=_ws_dtype)
                 except Exception:
                     pass
+                for _s in b:
+                    self._stale_resub_sym_ts[str(_s).upper()] = now
                 time.sleep(bsleep)
             logger.info(
                 "🔁 [ResubStale] Re-subscribed %s/%s symbols with heartbeat > %.0fs (feed fresh < %.0fs)",
@@ -371,6 +484,48 @@ class MasterScanner:
             )
         except Exception as e:
             logger.debug("Stale resubscribe skipped: %s", e)
+
+    def _maybe_recover_dead_subscription_map(self):
+        """
+        fyers_apiv3 clears ``symbol_token`` on reconnect but does not call ``subscribe`` again.
+        ``is_connected()`` only checks ``__ws_object`` is non-None, so TickHealth can show tokens=0
+        with no ticks until we replay subscriptions.
+        """
+        try:
+            if self.ws is None or not self.ws.is_connected():
+                return
+            tok_map = getattr(self.ws, "symbol_token", None)
+            if not tok_map:
+                tok_map = {}
+            if len(tok_map) > 0:
+                return
+            now = time.time()
+            cooldown = float(os.getenv("FYERS_WS_EMPTY_TOKEN_REPLAY_SEC", "30"))
+            if (now - self._last_full_ws_replay_ts) < cooldown:
+                return
+            targets = self._ws_full_subscribe_targets
+            if not targets:
+                targets = self._current_ws_target_symbols()
+            if not targets:
+                return
+            self._last_full_ws_replay_ts = now
+            _ws_dtype = os.getenv("FYERS_WS_DATA_TYPE", "SymbolUpdate")
+            _batch = max(50, min(500, int(os.getenv("FYERS_WS_SUB_BATCH", "200"))))
+            _sub_sleep = float(os.getenv("FYERS_WS_SUB_BATCH_SLEEP_SEC", "0.80"))
+            logger.error(
+                "🔴 [WS] symbol_token empty while socket open — replaying %s subscriptions "
+                "(Fyers SDK clears token map on reconnect without auto-resubscribe).",
+                len(targets),
+            )
+            for i in range(0, len(targets), _batch):
+                b = targets[i : i + _batch]
+                try:
+                    self.ws.subscribe(symbols=b, data_type=_ws_dtype)
+                except Exception as ex:
+                    logger.warning("Empty-token replay batch %s-%s failed: %s", i, i + len(b), ex)
+                time.sleep(_sub_sleep)
+        except Exception as e:
+            logger.debug("Dead subscription map recovery skipped: %s", e)
 
     def _log_tick_health(self):
         """
@@ -493,6 +648,57 @@ class MasterScanner:
             self._buy_session_latch.add(sym)
             return b"BUY NOW"
         return b"TRENDING"
+
+    def _universe_row_index_for_benchmark(self, b_sym: str) -> Optional[int]:
+        """
+        Index of ``b_sym`` in ``self.symbols`` for mirroring into BENCH_SLOTS.
+
+        Prefer exact / Fyers-canonical keys so we never match a stock row via \"naked\" collapse
+        (e.g. NIFTY50 vs an unrelated ticker) when building the 9001+ mirror slots.
+        """
+        k = str(b_sym).strip()
+        idx = self.sym_to_idx.get(k)
+        if idx is not None:
+            return idx
+        fy = self._to_fyers_symbol(k)
+        idx = self.sym_to_idx.get(fy)
+        if idx is not None:
+            return idx
+        nk = (
+            k.replace("NSE:", "")
+            .replace("-INDEX", "")
+            .replace("_", "")
+            .replace("-", "")
+            .upper()
+        )
+        hits: list[int] = []
+        for i, s in enumerate(self.symbols):
+            sn = (
+                str(s)
+                .replace("NSE:", "")
+                .replace("-INDEX", "")
+                .replace("_", "")
+                .replace("-", "")
+                .upper()
+            )
+            if sn == nk:
+                hits.append(i)
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return hits[0]
+        for i in hits:
+            if str(self.symbols[i]).upper().endswith("-INDEX"):
+                return i
+        sample = ", ".join(str(self.symbols[i]) for i in hits[:6])
+        logger.warning(
+            "Ambiguous benchmark naked-key %r for %s — multiple rows [%s]; using first hit %s",
+            nk,
+            b_sym,
+            sample,
+            self.symbols[hits[0]],
+        )
+        return hits[0]
 
     def _resolve_tick_idx(self, sym) -> Optional[int]:
         """
@@ -618,8 +824,38 @@ class MasterScanner:
             if univ != "All Securities" and univ != getattr(self, '_last_u_name', None):
                 from utils.symbols import get_nifty_symbols
                 raw_u = get_nifty_symbols(univ)
-                if raw_u: 
-                    self._valid_symbols_cache = set(f"NSE:{s}-EQ" if ":" not in s else s for s in raw_u)
+                if raw_u:
+                    # Universe CSVs can contain bare symbols while master symbols may carry
+                    # different series suffixes (-EQ/-SM/-ST/-BE). Build cache by naked-key
+                    # alignment against current scanner symbols so UI rows do not disappear.
+                    def _nk(x: str) -> str:
+                        t = str(x or "").upper().strip()
+                        if ":" in t:
+                            t = t.split(":", 1)[1]
+                        t = t.replace("-INDEX", "")
+                        if "-" in t:
+                            t = t.rsplit("-", 1)[0]
+                        return t.replace("_", "").replace("-", "")
+
+                    by_nk: dict[str, list[str]] = {}
+                    for ss in self.symbols:
+                        by_nk.setdefault(_nk(ss), []).append(ss)
+
+                    resolved: set[str] = set()
+                    for r in raw_u:
+                        key = _nk(r)
+                        hits = by_nk.get(key)
+                        if hits:
+                            for h in hits:
+                                resolved.add(h)
+                        else:
+                            rs = str(r)
+                            if ":" in rs:
+                                resolved.add(rs)
+                            else:
+                                # Fallback candidate when the symbol is not currently loaded.
+                                resolved.add(f"NSE:{rs}-EQ")
+                    self._valid_symbols_cache = resolved
                     self._last_u_name = univ
 
             valid_symbols = getattr(self, '_valid_symbols_cache', set(self.symbols))
@@ -685,9 +921,13 @@ class MasterScanner:
                 _s4 = getattr(self.math, "mrs_w_slope_4w", None)
                 _ms = getattr(self.math, "mrs_mansfield_slope", None)
                 _rc = getattr(self.math, "mrs_w_belowzero_rising", None)
+                _rc_l = getattr(self.math, "mrs_w_belowzero_rising_latched", None)
                 slope4 = float(_s4[i]) if _s4 is not None and i < len(_s4) else 0.0
                 m_slope = float(_ms[i]) if _ms is not None and i < len(_ms) else 0.0
-                mrs_rcvr = bool(_rc[i]) if _rc is not None and i < len(_rc) else False
+                if _rc_l is not None and i < len(_rc_l):
+                    mrs_rcvr = bool(_rc_l[i])
+                else:
+                    mrs_rcvr = bool(_rc[i]) if _rc is not None and i < len(_rc) else False
                 data.append({
                     "symbol": sym,
                     "ltp": float(r['ltp']),
@@ -955,9 +1195,25 @@ class MasterScanner:
                     f"Fyers WebSocket not ready after {_timeout:.0f}s; check token, network, or Fyers status."
                 )
             time.sleep(1.5)
-            formatted_symbols = list(
-                {self._to_fyers_symbol(f"NSE:{s}-EQ" if ":" not in s else s) for s in self.symbols}
-            )
+            # Dedupe in self.symbols order (not random set iteration); put Fyers index symbols first so
+            # NIFTY50/NIFTY500 subscribe early and bench_prices_w updates before the main grid.
+            _seen_fy: set[str] = set()
+            formatted_symbols: list[str] = []
+            for _s in self.symbols:
+                _fy = self._to_fyers_symbol(f"NSE:{_s}-EQ" if ":" not in str(_s) else str(_s))
+                _u = str(_fy).upper()
+                if _u in _seen_fy:
+                    continue
+                _seen_fy.add(_u)
+                formatted_symbols.append(_fy)
+            _bfy_u = {self._to_fyers_symbol(b).upper() for b in BENCHMARK_MAP.values()}
+            _head = sorted([x for x in formatted_symbols if str(x).upper() in _bfy_u])
+            _bs_u = self._to_fyers_symbol(self.math.bench_sym).upper()
+            _head = [x for x in _head if str(x).upper() == _bs_u] + [
+                x for x in _head if str(x).upper() != _bs_u
+            ]
+            _tail = [x for x in formatted_symbols if str(x).upper() not in _bfy_u]
+            formatted_symbols = _head + _tail
             # Unified invalid/unwanted symbols source: persisted auto-blocklist file.
             _ws_exclude = set()
             self._load_invalid_ws_symbols()
@@ -968,7 +1224,14 @@ class MasterScanner:
                     "Capping WebSocket subscription at 5000 symbols (have %s).",
                     len(formatted_symbols),
                 )
-                formatted_symbols = formatted_symbols[:5000]
+                _cap_bfy = {self._to_fyers_symbol(b).upper() for b in BENCHMARK_MAP.values()}
+                _ch = [s for s in formatted_symbols if str(s).upper() in _cap_bfy]
+                _cur_bs = self._to_fyers_symbol(self.math.bench_sym).upper()
+                _ch = [s for s in _ch if str(s).upper() == _cur_bs] + [
+                    s for s in _ch if str(s).upper() != _cur_bs
+                ]
+                _ct = [s for s in formatted_symbols if str(s).upper() not in _cap_bfy]
+                formatted_symbols = _ch + _ct[: max(0, 5000 - len(_ch))]
             _batch = max(50, min(500, int(os.getenv("FYERS_WS_SUB_BATCH", "200"))))
             _sub_sleep = float(os.getenv("FYERS_WS_SUB_BATCH_SLEEP_SEC", "0.80"))
             logger.info(
@@ -1106,13 +1369,12 @@ class MasterScanner:
                     "Fyers subscribe produced zero symbol_token entries (symbol conversion failed or silent SDK error). "
                     "Check token, api-t1.fyers.in from this container, and FYERS_WS_DATA_TYPE=SymbolUpdate."
                 )
+            self._ws_full_subscribe_targets = list(formatted_symbols)
             self.last_flush = time.time()
 
             while True:
                 try:
                     # MASTER PULSE RE-INITIALIZATION: Global Scope Protection
-                    from utils.constants import BENCHMARK_MAP
-                    
                     # SOVEREIGN MASTER PULSE: Forcefully push current prices for Benchmarks into FIXED SHM SLOTS
                     # This eliminates 'Same Price' bug by anchoring each Index to its own hardware-level slot.
                     BENCH_SLOTS = {
@@ -1124,16 +1386,7 @@ class MasterScanner:
                         slot = BENCH_SLOTS.get(b_sym)
                         if slot:
                             r = self.shm.arr[slot]
-                            # AGGRESSIVE NAKED LOOKUP: Finds 'NIFTY100' even if name is 'NSE:NIFTY100-INDEX'
-                            naked_key = b_sym.replace('NSE:', '').replace('-INDEX', '').replace('_', '').replace('-', '').upper()
-                            
-                            original_idx = None
-                            for i, s in enumerate(self.symbols):
-                                s_naked = str(s).replace('NSE:', '').replace('-INDEX', '').replace('_', '').replace('-', '').upper()
-                                if naked_key == s_naked:
-                                    original_idx = i
-                                    break
-                            
+                            original_idx = self._universe_row_index_for_benchmark(b_sym)
                             if original_idx is not None:
                                 # Header / sidebar read benchmark from fixed BENCH_SLOTS (9001+), not from
                                 # the primary index row. Mirror the live row so CHG% matches ticks + on_tick.
@@ -1214,6 +1467,7 @@ class MasterScanner:
                     logger.error(f"❌ [Master] Critical Loop Error (Pulse/DB): {e}")
                     import traceback; traceback.print_exc()
                 self._log_tick_health()
+                self._maybe_recover_dead_subscription_map()
                 self._maybe_resubscribe_unresolved_symbols()
                 self._maybe_resubscribe_stale_symbols()
 

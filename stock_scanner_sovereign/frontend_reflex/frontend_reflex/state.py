@@ -1,6 +1,38 @@
+import os
 import reflex as rx, asyncio, time
+from urllib.parse import quote
+
 from .engine import get_scanner
 from .state_tasks import poll_results_handler, download_excel_logic
+
+
+def screener_in_url(symbol: str) -> str:
+    """
+    Screener.in: use ``/company/{slug}/consolidated/`` for EQ — that is their default full
+    fundamental view (Market Cap, P/E, ROE, Book Value, Pros/Cons, peers, etc.). Bare
+    ``/company/{slug}/`` often shows a thinner page; we cannot inject custom screen queries via URL.
+
+    Indices: search (no single company fundamentals page). Tickers may still 404 on Screener
+    vs NSE (e.g. some hyphen rules).
+    """
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return "https://www.screener.in/"
+    if ":" in s:
+        s = s.split(":", 1)[1]
+    if s.endswith("-INDEX"):
+        q = s.replace("-INDEX", "").replace("_", " ").replace("-", " ").strip()
+        return f"https://www.screener.in/search/?q={quote(q or 'nifty')}"
+    if s.endswith("-EQ"):
+        s = s[:-3]
+    slug = s.replace("_", "-")
+    slug_q = quote(slug, safe="-")
+    base = f"https://www.screener.in/company/{slug_q}/consolidated/"
+    frag = (os.getenv("SCREENER_IN_URL_FRAGMENT") or "").strip()
+    if frag and not frag.startswith("#"):
+        frag = "#" + frag
+    return base + frag
+
 
 class State(rx.State):
     scanner_results: list[dict] = []
@@ -107,3 +139,34 @@ class State(rx.State):
         idx_alias = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}
         tv_sym = idx_alias.get(base, base)
         return rx.redirect(f"https://www.tradingview.com/chart/?symbol=NSE:{tv_sym}", is_external=True)
+
+    def open_screener_in(self, symbol: str):
+        """Open Screener.in for fundamental checks (separate from TradingView chart)."""
+        return rx.redirect(screener_in_url(symbol), is_external=True)
+
+    def scanner_snapshot_alert(
+        self,
+        symbol: str,
+        p1d: str,
+        rs_rating,
+        mrs_str: str,
+        mrs_prev_day_str: str,
+        mrs_daily_str: str,
+        rv,
+        profile: str,
+        status: str,
+        brk_lvl_str: str,
+        mrs_rcvr_str: str,
+    ):
+        """Key technicals already in this scanner (not P/E or balance sheet — use sc → Screener)."""
+        msg = (
+            "Scanner snapshot (technicals from this grid)\n\n"
+            f"{symbol}\n"
+            f"CHG%: {p1d}  |  RS: {rs_rating}\n"
+            f"W_mRS: {mrs_str}  |  Prior EOD mRS: {mrs_prev_day_str}\n"
+            f"D_mRS: {mrs_daily_str}  |  RVOL: {rv}\n"
+            f"Profile: {profile}  |  Status: {status}\n"
+            f"BRK: {brk_lvl_str}  |  RCVR: {mrs_rcvr_str}\n\n"
+            "For PE, ROE, debt, results → click [sc] (Screener.in)."
+        )
+        return rx.window_alert(msg)

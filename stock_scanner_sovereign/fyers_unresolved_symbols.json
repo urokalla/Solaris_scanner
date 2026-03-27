@@ -1,7 +1,16 @@
 {
-  "timestamp": 1774479103,
-  "tokens": 2430,
-  "expected": 2430,
-  "missing": 0,
-  "symbols": []
+  "timestamp": 1774620454,
+  "tokens": 2443,
+  "expected": 2451,
+  "missing": 8,
+  "symbols": [
+    "NSE:PAUSHAKLTD-EQ",
+    "NSE:PGHL-EQ",
+    "NSE:PHARMABEES-EQ",
+    "NSE:PHOENIXLTD-EQ",
+    "NSE:PICCADIL-EQ",
+    "NSE:PRIVISCL-EQ",
+    "NSE:PTL-EQ",
+    "NSE:PUNJABCHEM-EQ"
+  ]
 }

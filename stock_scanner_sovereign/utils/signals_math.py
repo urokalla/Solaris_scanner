@@ -78,9 +78,12 @@ def generate_breakout_signal(symbol, h, bench_h, params):
 
     brk_lvl = _pivot_break_level()
 
+    mrs_rcvr = bool(rs_info.get("mrs_rcvr", False))
     if h is None or len(h) < min_bars:
         if mrs > 0:
             return {"status": "STAGE 2", "trend_up": True, "mrs": mrs, "brk_lvl": brk_lvl}
+        if mrs_rcvr:
+            return {"status": "STAGE 1", "trend_up": False, "mrs": mrs, "brk_lvl": brk_lvl}
         return {"status": "STAGE 4", "trend_up": False, "mrs": mrs, "brk_lvl": brk_lvl}
 
     curr = h[-1, 4]
@@ -92,6 +95,7 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     mrs = float(rs_info.get("mrs", 0.0))
     mrs_prev = float(rs_info.get("mrs_prev", 0.0))
     mrs_sig = float(rs_info.get("mrs_signal", 0.0))
+    mrs_rcvr = bool(rs_info.get("mrs_rcvr", False))
     
     # Stage 2 Entry: Cross 0 OR (Cross Signal Line and MRS > 0)
     # Note: mrs_signal would normally be an SMA of MRS. 
@@ -106,6 +110,8 @@ def generate_breakout_signal(symbol, h, bench_h, params):
         sig = "NEAR BRK"
     elif mrs > 0:
         sig = "STAGE 2"
+    elif mrs_rcvr:
+        sig = "STAGE 1"
     else:
         sig = "STAGE 4"
         

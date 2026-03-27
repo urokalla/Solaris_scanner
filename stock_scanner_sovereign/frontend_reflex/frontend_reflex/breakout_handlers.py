@@ -31,7 +31,7 @@ def download_excel_handler(self):
         brk_stage=self.filter_brk_stage,
         filter_mrs_grid=self.filter_mrs_grid,
         filter_m_rsi2=self.filter_m_rsi2,
-        preset=self.preset_mode,
+        preset="ALL",
         sort_key=self.sort_sidecar_key,
         sort_desc=self.sort_sidecar_desc,
     )

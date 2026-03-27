@@ -1,5 +1,5 @@
 import reflex as rx
-from .state import State
+from .state import State, screener_in_url
 from .breakout_engine_manager import get_breakout_scanner
 from .breakout_handlers import update_engine_config_handler, download_excel_handler
 from .breakout_tasks import poll_sidecar_handler
@@ -210,6 +210,31 @@ class BreakoutState(rx.State):
         }
         tv_sym = idx_alias.get(base, base)
         return rx.redirect(f"https://www.tradingview.com/chart/?symbol=NSE:{tv_sym}", is_external=True)
+
+    def open_screener_in(self, symbol: str):
+        return rx.redirect(screener_in_url(symbol), is_external=True)
+
+    def sidecar_snapshot_alert(
+        self,
+        symbol: str,
+        ltp,
+        chp: str,
+        brk_lvl,
+        mrs_weekly: str,
+        trend_text: str,
+        status: str,
+        mrs_grid_status: str,
+    ):
+        msg = (
+            "Sidecar snapshot (technicals)\n\n"
+            f"{symbol}\n"
+            f"LTP: {ltp}  |  CHG%: {chp}\n"
+            f"BRK: {brk_lvl}  |  W mRS: {mrs_weekly}\n"
+            f"Trend: {trend_text}  |  Stage: {status}\n"
+            f"Grid: {mrs_grid_status}\n\n"
+            "Fundamentals → use [sc] next to symbol (opens Screener.in)."
+        )
+        return rx.window_alert(msg)
 
     @rx.event(background=True)
     async def poll_sidecar(self): await poll_sidecar_handler(self)

@@ -1,5 +1,5 @@
-import os, time, psycopg2, numpy as np, logging
-from utils.constants import UNIVERSE_ID_BY_DISPLAY
+import os, time, psycopg2, numpy as np, logging, csv
+from utils.constants import UNIVERSE_ID_BY_DISPLAY, SYMBOL_GROUPS
 
 logger = logging.getLogger(__name__)
 from psycopg2.extras import execute_values
@@ -84,7 +84,33 @@ class DatabaseManager:
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT symbol_id FROM universe_members WHERE universe_id = %s", (uid,))
-                return [r[0] for r in cur.fetchall()]
+                rows = [r[0] for r in cur.fetchall()]
+        if rows:
+            return rows
+        # DB fallback: allow newly-added universes to work immediately from CSV even before re-seeding tables.
+        rel = SYMBOL_GROUPS.get(universe_id)
+        if not rel:
+            return rows
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        p = os.path.join(base, rel)
+        if not os.path.exists(p):
+            return rows
+        try:
+            with open(p, encoding="utf-8-sig") as f:
+                r = csv.DictReader(f)
+                c = next((h for h in (r.fieldnames or []) if h.lower() == "symbol"), (r.fieldnames or ["Symbol"])[0])
+                out = []
+                for row in r:
+                    v = row.get(c)
+                    s = v.strip().upper() if v else ""
+                    if not s:
+                        continue
+                    out.append(
+                        s if s.startswith("NSE:") else (f"NSE:{s}" if "INDEX" in s else f"NSE:{s}-EQ")
+                    )
+                return out
+        except Exception:
+            return rows
 
     def get_all_active_symbols(self):
         with self.get_connection() as conn:

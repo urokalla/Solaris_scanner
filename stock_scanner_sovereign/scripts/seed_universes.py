@@ -4,6 +4,21 @@ from utils.constants import SYMBOL_GROUPS, UNIVERSE_ID_BY_DISPLAY
 from psycopg2.extras import execute_values
 L = logging.getLogger("Seeder"); logging.basicConfig(level=20)
 
+def _to_exchange_symbol(symbol: str, series: str | None = None) -> str:
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return ""
+    if s.startswith("NSE:"):
+        return s
+    if "INDEX" in s:
+        return f"NSE:{s}"
+    if "-" in s and s.rsplit("-", 1)[-1] in {"EQ", "BE", "SM", "ST"}:
+        return f"NSE:{s}"
+    sr = str(series or "").strip().upper()
+    if sr not in {"EQ", "BE", "SM", "ST"}:
+        sr = "EQ"
+    return f"NSE:{s}-{sr}"
+
 def seed_universes():
     db = DatabaseManager(); bas = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with db.get_connection() as conn, conn.cursor() as cur:
@@ -27,11 +42,16 @@ def seed_universes():
                             )
                 else:
                     with open(p, encoding='utf-8-sig') as f:
-                        r = csv.DictReader(f); c = next((h for h in r.fieldnames if h.lower()=='symbol'), r.fieldnames[0])
+                        r = csv.DictReader(f)
+                        c = next((h for h in r.fieldnames if h.lower()=='symbol'), r.fieldnames[0])
+                        sc = next((h for h in r.fieldnames if h.lower()=="series"), None)
                         sn = []
                         for row in r:
                             v = row.get(c); s = v.strip().upper() if v else ""
-                            if s: sn.append(s if s.startswith("NSE:") else (f"NSE:{s}" if "INDEX" in s else f"NSE:{s}-EQ"))
+                            series = row.get(sc) if sc else None
+                            norm = _to_exchange_symbol(s, series)
+                            if norm:
+                                sn.append(norm)
             except Exception as e: L.error(f"Err {p}: {e}"); continue
             if not sn:
                 continue

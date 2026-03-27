@@ -1,5 +1,6 @@
 import reflex as rx
 from ..breakout_state import BreakoutState
+from utils.constants import UNIVERSE_OPTIONS
 def breakout_header():
     return rx.vstack(
         rx.hstack(
@@ -22,13 +23,12 @@ def breakout_header():
         ), spacing="0", width="100%"
     )
 def breakout_sidebar():
-    options = ["Nifty 50", "Nifty 100", "Nifty 500", "All NSE Stocks"]
-    preset_options = ["ALL", "EARLY", "RETEST", "STRONG_RETEST", "FAST20", "HIGH10", "HIGH10_LITE", "BUYNOW_CROSS", "BREAKOUT", "STAGE 2"]
     brk_options = [
         "ALL",
         "BUY NOW",
         "BREAKOUT",
         "NEAR BRK",
+        "STAGE 1",
         "STAGE 2",
         "STAGE 4",
         "N.A.",
@@ -37,7 +37,7 @@ def breakout_sidebar():
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
         rx.vstack(
-            rx.foreach(options, lambda u: rx.button(
+            rx.foreach(UNIVERSE_OPTIONS, lambda u: rx.button(
                 u, on_click=lambda: BreakoutState.set_universe(u), variant="ghost",
                 color=rx.cond(BreakoutState.universe == u, "#FFB000", "#D1D1D1"), width="100%", text_align="left",
                 justify_content="start", padding_x="15px", height="30px", font_size="12px",
@@ -49,21 +49,6 @@ def breakout_sidebar():
         rx.box(height="8px"),
         rx.text("FILTERS", size="1", color="#D1D1D1", font_weight="bold", padding="8px 15px 4px 15px"),
         rx.vstack(
-            rx.text("Preset", size="1", color="#888888", padding_left="15px"),
-            rx.select(
-                preset_options,
-                value=BreakoutState.preset_mode,
-                on_change=BreakoutState.set_preset_mode,
-                color="white",
-                bg="#111111",
-                border="1px solid #333333",
-                size="1",
-                width="100%",
-                max_width="260px",
-                margin_left="15px",
-                margin_right="15px",
-                height="32px",
-            ),
             rx.text("Symbol contains", size="1", color="#888888", padding_left="15px"),
             rx.input(
                 placeholder="e.g. RELIANCE",

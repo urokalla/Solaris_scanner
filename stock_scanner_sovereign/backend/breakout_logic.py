@@ -159,8 +159,12 @@ def main_loop_helper(self):
                 # - Compute weekly Mansfield mRS series from daily history buffer (hv) + benchmark (b_vw).
                 # - Compute mRS_signal = SMA(mRS, 30) (your Pine script).
                 # - Compute slopeLine = EMA(mRS, 30) or SMA(mRS, 30) (your "slope line").
-                # - Signal when: mRS < 0 AND slopeLine is rising AND crossover(mRS_signal, slopeLine).
+                # - Signal when: slopeLine is rising by eps AND signal line crosses above slope line.
                 rvcr_refresh = float(os.getenv("MRS_RVCR_WEEKLY_REFRESH_SEC", "60"))
+                ma_len = int(os.getenv("MRS_WEEKLY_BASE_MA_LEN", "52"))
+                sig_len = int(os.getenv("MRS_WEEKLY_SIGNAL_LEN", "30"))
+                slope_len = int(os.getenv("MRS_RVCR_SLOPE_LEN", "30"))
+                slope_eps = float(os.getenv("MRS_RVCR_SLOPE_EPS", "0.01"))
                 now_ts = time.time()
                 if not hasattr(self, "_rvcr_weekly_cache"):
                     self._rvcr_weekly_cache = {}
@@ -178,57 +182,57 @@ def main_loop_helper(self):
                         wk_b = _weekly_close_map_from_ohlcv(b_vw) if b_vw is not None else {}
                         if wk_s and wk_b:
                             keys = sorted(set(wk_s.keys()) & set(wk_b.keys()))
-                            # Need enough weeks for SMA52 + MA30 + 2 bars for slope/cross checks.
-                            need_weeks = int(ma_len + max(sig_len, slope_len) + 2)
+                            # Allow shorter-history symbols by adapting MA lengths to available weeks.
+                            # We still require at least 3 points for a reliable last/prev check.
+                            need_weeks = int(max(3, max(sig_len, slope_len) + 2))
                             if len(keys) >= need_weeks:
                                 s_close = np.asarray([wk_s[k] for k in keys], dtype=np.float64)
                                 b_close = np.asarray([wk_b[k] for k in keys], dtype=np.float64)
                                 ratio = s_close / (b_close + 1e-9)
                                 # Pine: avgRatio = sma(baseRatio, 52); mRS = ((ratio/avgRatio)-1)*10
-                                ma_len = int(os.getenv("MRS_WEEKLY_BASE_MA_LEN", "52"))
-                                sig_len = int(os.getenv("MRS_WEEKLY_SIGNAL_LEN", "30"))
-                                slope_len = int(os.getenv("MRS_RVCR_SLOPE_LEN", "30"))
+                                ma_eff = max(3, min(ma_len, int(ratio.size - 2)))
+                                sig_eff = max(2, min(sig_len, int(ratio.size)))
+                                slope_eff = max(2, min(slope_len, int(ratio.size)))
                                 # rolling SMA for ratio
                                 avg = np.full_like(ratio, np.nan, dtype=np.float64)
-                                if ratio.size >= ma_len:
+                                if ratio.size >= ma_eff:
                                     csum = np.cumsum(ratio, dtype=np.float64)
                                     csum = np.insert(csum, 0, 0.0)
-                                    for i2 in range(ma_len - 1, ratio.size):
-                                        avg[i2] = (csum[i2 + 1] - csum[i2 + 1 - ma_len]) / float(ma_len)
+                                    for i2 in range(ma_eff - 1, ratio.size):
+                                        avg[i2] = (csum[i2 + 1] - csum[i2 + 1 - ma_eff]) / float(ma_eff)
                                 mrs_series = np.nan_to_num(((ratio / (avg + 1e-12)) - 1.0) * 10.0, nan=0.0)
 
                                 # Signal line (SMA of mRS)
                                 sig = np.full_like(mrs_series, np.nan, dtype=np.float64)
-                                if mrs_series.size >= sig_len:
+                                if mrs_series.size >= sig_eff:
                                     c2 = np.cumsum(mrs_series, dtype=np.float64)
                                     c2 = np.insert(c2, 0, 0.0)
-                                    for i2 in range(sig_len - 1, mrs_series.size):
-                                        sig[i2] = (c2[i2 + 1] - c2[i2 + 1 - sig_len]) / float(sig_len)
+                                    for i2 in range(sig_eff - 1, mrs_series.size):
+                                        sig[i2] = (c2[i2 + 1] - c2[i2 + 1 - sig_eff]) / float(sig_eff)
 
                                 # Slope line: EMA30 or SMA30 of mRS
                                 ma_type = os.getenv("MRS_RVCR_SLOPE_MA_TYPE", "EMA").strip().upper()
                                 if ma_type == "SMA":
                                     slope = np.full_like(mrs_series, np.nan, dtype=np.float64)
-                                    if mrs_series.size >= slope_len:
+                                    if mrs_series.size >= slope_eff:
                                         c3 = np.cumsum(mrs_series, dtype=np.float64)
                                         c3 = np.insert(c3, 0, 0.0)
-                                        for i2 in range(slope_len - 1, mrs_series.size):
-                                            slope[i2] = (c3[i2 + 1] - c3[i2 + 1 - slope_len]) / float(slope_len)
+                                        for i2 in range(slope_eff - 1, mrs_series.size):
+                                            slope[i2] = (c3[i2 + 1] - c3[i2 + 1 - slope_eff]) / float(slope_eff)
                                 else:
-                                    slope = _ema_series(mrs_series, slope_len)
+                                    slope = _ema_series(mrs_series, slope_eff)
 
                                 # Latest usable index (both lines present)
                                 i_last = int(mrs_series.size - 1)
-                                if i_last >= 1 and np.isfinite(sig[i_last]) and np.isfinite(slope[i_last]) and np.isfinite(slope[i_last - 1]):
-                                    mrs_now = float(mrs_series[i_last])
-                                    slope_up = float(slope[i_last]) > float(slope[i_last - 1])
-                                    # Your weekly chart visual: mRS (green) breaking above the slope MA line.
-                                    cross = (float(mrs_series[i_last - 1]) <= float(slope[i_last - 1])) and (
-                                        float(mrs_series[i_last]) > float(slope[i_last])
-                                    )
-                                    zmax = float(os.getenv("MRS_RCVR_BELOW_ZERO_MAX", "0"))
-                                    flag = (mrs_now < zmax) and slope_up and cross
+                                if i_last >= 1 and np.isfinite(slope[i_last]) and np.isfinite(slope[i_last - 1]):
                                     slope_val = float(slope[i_last] - slope[i_last - 1])
+                                    slope_up = slope_val > slope_eps
+                                    if np.isfinite(sig[i_last]) and np.isfinite(sig[i_last - 1]):
+                                        # Signal rule: slope rising + signal line piercing above slope line.
+                                        sig_cross = (float(sig[i_last - 1]) <= float(slope[i_last - 1])) and (
+                                            float(sig[i_last]) > float(slope[i_last])
+                                        )
+                                        flag = slope_up and sig_cross
                     except Exception:
                         flag = False
                         slope_val = 0.0
@@ -238,12 +242,24 @@ def main_loop_helper(self):
                         self.results[s]["mrs_rcvr"] = bool(flag)
                         self.results[s]["mrs_rcvr_slope"] = float(slope_val)
 
+                # Latch RVCR while mRS is below zero so Stage-1 candidates do not flicker.
+                with self.lock:
+                    prev_latched = bool(self.results[s].get("mrs_rcvr_latched", False))
+                    curr_flag = bool(self.results[s].get("mrs_rcvr", False))
+                    if current_mrs < 0:
+                        latched = prev_latched or curr_flag
+                    else:
+                        latched = False
+                    self.results[s]["mrs_rcvr_latched"] = latched
+                    self.results[s]["mrs_rcvr"] = latched
+
                 # 3. Generate Pro Signature Signal
                 p["rs_rating_info"] = {
                     "rs_rating": int(row['rs_rating']),
                     "mrs": current_mrs,
                     "mrs_prev": float(row['mrs_prev']) if 'mrs_prev' in row.dtype.names else current_mrs,
                     "mrs_signal": mrs_signal,
+                    "mrs_rcvr": bool(self.results[s].get("mrs_rcvr", False)),
                 }
                 hv = self.buffers[s].get_ordered_view()
                 try:
@@ -740,8 +756,9 @@ def format_ui_row(d):
         'mrs_grid_status': _gs,
         'mrs_grid_status_color': _gsc,
         'mrs_rcvr': bool(d.get("mrs_rcvr", False)),
-        'mrs_rcvr_str': f"{float(d.get('mrs_rcvr_slope', 0.0)):+.3f}" + (" ↑<0" if bool(d.get("mrs_rcvr", False)) else ""),
-        'mrs_rcvr_color': "#00FFAA" if bool(d.get("mrs_rcvr", False)) else "#555555",
+        'mrs_rcvr_slope_up': float(d.get("mrs_rcvr_slope", 0.0)) > 0,
+        'mrs_rcvr_str': f"{float(d.get('mrs_rcvr_slope', 0.0)):+.3f}" + (" ↑SIG" if bool(d.get("mrs_rcvr", False)) else ""),
+        'mrs_rcvr_color': "#00FFAA" if float(d.get("mrs_rcvr_slope", 0.0)) > 0 else "#555555",
         'brk_lvl': brk_disp,
         'stop_price': stop_disp,
         'udai_ui': udai_disp,

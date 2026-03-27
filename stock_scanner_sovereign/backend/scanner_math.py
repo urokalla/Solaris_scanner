@@ -43,6 +43,8 @@ class RSMathEngine:
         self.mrs_w_slope_4w = np.zeros(self.n)
         self.mrs_w_slope_1w = np.zeros(self.n)
         self.mrs_w_belowzero_rising = np.zeros(self.n, dtype=bool)
+        # Session latch for below-zero-rising so dashboard filter remains stable while mRS<0.
+        self.mrs_w_belowzero_rising_latched = np.zeros(self.n, dtype=bool)
         self.rs_ratings = np.zeros(self.n, dtype=int)
         self.vol_avg = np.zeros(self.n)
         # Today's cumulative volume (Fyers tick `v`); RVOL = day_vol / vol_avg
@@ -216,12 +218,17 @@ class RSMathEngine:
                 & (self.mrs_mansfield_slope > thr_slope)
                 & short_up
             )
+            self.mrs_w_belowzero_rising_latched = (
+                (self.mrs_results < zmax)
+                & (self.mrs_w_belowzero_rising_latched | self.mrs_w_belowzero_rising)
+            )
         except Exception as ex:
             logger.debug("mrs weekly dynamics skipped: %s", ex)
             self.mrs_mansfield_slope = np.zeros(self.n)
             self.mrs_w_slope_4w = np.zeros(self.n)
             self.mrs_w_slope_1w = np.zeros(self.n)
             self.mrs_w_belowzero_rising = np.zeros(self.n, dtype=bool)
+            self.mrs_w_belowzero_rising_latched = np.zeros(self.n, dtype=bool)
 
         return self.mrs_results, self.mrs_daily, self.rs_ratings
 

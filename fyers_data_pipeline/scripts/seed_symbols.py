@@ -37,6 +37,8 @@ def seed_universes(db):
         ("NIFTY_100", "NIFTY 100"), # Added
         ("MIDCAP_100", "MIDCAP 100"),
         ("SMALLCAP_100", "SMALLCAP 100"),
+        ("SMALLCAP_250", "SMALLCAP 250"),
+        ("SME_LIST", "SME LIST"),
         ("MIDCAP_250", "MIDCAP 250"),
         ("MICROCAP_250", "MICROCAP_250"),
         ("NIFTY_500", "NIFTY 500"),
@@ -181,6 +183,8 @@ def main():
         ("nifty100.csv", "NIFTY_100"),
         ("nifty_midcap100.csv", "MIDCAP_100"),
         ("nifty_smallcap100.csv", "SMALLCAP_100"),
+        ("nifty_smallcap250.csv", "SMALLCAP_250"),
+        ("sme_list.csv", "SME_LIST"),
         ("microcap250.csv", "MICROCAP_250"),
         ("nifty500.csv", "NIFTY_500")
     ]
