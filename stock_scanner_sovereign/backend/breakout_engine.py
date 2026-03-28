@@ -198,11 +198,46 @@ class BreakoutScanner:
         logger = logging.getLogger("BreakoutEngine")
         if st != "ALL":
             logger.info(f"🔍 [Breakout] BRK_STAGE={st} filter on {len(data)} symbols...")
-            data = [
-                d
-                for d in data
-                if (d.get("status") == st or (st == "BREAKOUT" and d.get("is_breakout")))
-            ]
+            if st == "EMA30_PULLBACK_LT50_NO_SME":
+                filt = []
+                for d in data:
+                    sym_u = str(d.get("symbol") or "").upper()
+                    # Exclude SME-like series
+                    if sym_u.endswith("-SM") or sym_u.endswith("-ST"):
+                        continue
+                    try:
+                        ltp = float(d.get("ltp") or 0.0)
+                        ema30 = float(d.get("ema30") or 0.0)
+                        ema30_prev = float(d.get("ema30_prev") or 0.0)
+                        prev_c = float(d.get("prev_close") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    if ltp <= 0 or ema30 <= 0:
+                        continue
+                    if ltp >= 200.0:
+                        continue
+                    # Strict current-candle pierce check:
+                    # prev close above EMA30, now at/below EMA30, and current candle is down.
+                    if prev_c <= 0:
+                        continue
+                    # Reject down-sloping EMA30; want setup on a non-negative slope baseline.
+                    if ema30_prev > 0 and not (ema30 >= ema30_prev):
+                        continue
+                    prev_above = prev_c > (ema30 * 1.0025)
+                    now_pierce = ltp <= (ema30 * 1.0)
+                    down_candle = ltp < prev_c
+                    # Avoid names already significantly below EMA30; keep true near-pierce only.
+                    not_deep_below = ltp >= (ema30 * 0.995)
+                    if not (prev_above and now_pierce and down_candle and not_deep_below):
+                        continue
+                    filt.append(d)
+                data = filt
+            else:
+                data = [
+                    d
+                    for d in data
+                    if (d.get("status") == st or (st == "BREAKOUT" and d.get("is_breakout")))
+                ]
         fm = (kw.get("filter_m_rsi2") or "ALL").strip().upper()
         if fm == "LT2":
             data = [

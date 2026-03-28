@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 from utils.quant_breakout_config import get_breakout_window_dict
 
@@ -66,6 +67,8 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     # Provide basic status even if history is still syncing
     rs_info = params.get("rs_rating_info", {})
     mrs = float(rs_info.get("mrs", 0.0))
+    stage1_box = bool(rs_info.get("stage1_box", False))
+    mrs_neg_ma10_rising = bool(rs_info.get("mrs_neg_ma10_rising", False))
 
     # Pivot / "breakout level": use adaptive window when tape is shorter than pivot_w+1 bars.
     def _pivot_break_level():
@@ -96,12 +99,17 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     mrs_prev = float(rs_info.get("mrs_prev", 0.0))
     mrs_sig = float(rs_info.get("mrs_signal", 0.0))
     mrs_rcvr = bool(rs_info.get("mrs_rcvr", False))
+    stage1_box = bool(rs_info.get("stage1_box", False))
+    mrs_neg_ma10_rising = bool(rs_info.get("mrs_neg_ma10_rising", False))
+    stage2_confirm = bool(rs_info.get("stage2_confirm", False))
     
     # Stage 2 Entry: Cross 0 OR (Cross Signal Line and MRS > 0)
     # Note: mrs_signal would normally be an SMA of MRS. 
     # For this atomic check, we prioritize the 0-cross which is the primary driver.
     sig = "N.A."
-    if (mrs > 0 and mrs_prev <= 0) or (mrs > mrs_sig and mrs_prev <= mrs_sig and mrs > 0):
+    if stage2_confirm:
+        sig = "STAGE2_CONFIRMED"
+    elif (mrs > 0 and mrs_prev <= 0) or (mrs > mrs_sig and mrs_prev <= mrs_sig and mrs > 0):
         sig = "BUY NOW"
     elif curr > high_prior:
         sig = "BREAKOUT"
@@ -110,14 +118,19 @@ def generate_breakout_signal(symbol, h, bench_h, params):
         sig = "NEAR BRK"
     elif mrs > 0:
         sig = "STAGE 2"
-    elif mrs_rcvr:
-        sig = "STAGE 1"
     else:
-        sig = "STAGE 4"
+        strict_stage1 = os.getenv("STAGE1_STRICT_AND_RS", "true").strip().lower() in ("1", "true", "yes")
+        stage1_ok = (stage1_box and mrs_neg_ma10_rising) if strict_stage1 else (stage1_box or mrs_neg_ma10_rising)
+        if stage1_ok:
+            sig = "STAGE 1"
+        elif mrs_rcvr:
+            sig = "STAGE 1"
+        else:
+            sig = "STAGE 4"
         
     return {
         "status": sig,
-        "is_breakout": sig == "BREAKOUT",
+        "is_breakout": sig in ("BREAKOUT", "STAGE2_CONFIRMED"),
         "ltp": float(curr),
         "trend_up": mrs > 0,
         "mrs": mrs,

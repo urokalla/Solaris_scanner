@@ -46,6 +46,141 @@ def _weekly_close_map_from_ohlcv(h: np.ndarray) -> dict[tuple[int, int], float]:
     return out
 
 
+def _stage1_price_box_from_ohlcv(h: np.ndarray) -> tuple[bool, int, float, bool, float, bool, float, bool]:
+    """
+    Stage-1 base detector (8+ weeks box):
+    - price stays between a weekly floor/ceiling for min weeks
+    - repeated tests near ceiling/floor (>=2 touches each)
+    """
+    if h is None or len(h) < 30:
+        return False, 0, 0.0, False, 0.0, False, 0.0, False
+    try:
+        week = {}
+        # Expected columns: [ts, open, high, low, close, vol]
+        for r in h:
+            try:
+                ts = float(r[0])
+                hi = float(r[2])
+                lo = float(r[3])
+                cl = float(r[4])
+                vv = float(r[5]) if len(r) > 5 else 0.0
+            except Exception:
+                continue
+            if not np.isfinite(ts) or not np.isfinite(hi) or not np.isfinite(lo) or not np.isfinite(cl):
+                continue
+            if hi <= 0 or lo <= 0 or cl <= 0 or lo > hi:
+                continue
+            d = datetime.utcfromtimestamp(ts).date()
+            iso = d.isocalendar()
+            k = (int(iso.year), int(iso.week))
+            w = week.get(k)
+            if w is None:
+                week[k] = [hi, lo, cl, max(0.0, vv)]
+            else:
+                if hi > w[0]:
+                    w[0] = hi
+                if lo < w[1]:
+                    w[1] = lo
+                w[2] = cl
+                w[3] += max(0.0, vv)
+        if len(week) < 8:
+            return False, 0, 0.0, False, 0.0, False, 0.0, False
+        keys = sorted(week.keys())
+        highs_all = np.asarray([week[k][0] for k in keys], dtype=np.float64)
+        lows_all = np.asarray([week[k][1] for k in keys], dtype=np.float64)
+        closes_all = np.asarray([week[k][2] for k in keys], dtype=np.float64)
+        vols_all = np.asarray([week[k][3] for k in keys], dtype=np.float64)
+        min_weeks = int(os.getenv("STAGE1_BOX_MIN_WEEKS", "8"))
+        lookback = int(os.getenv("STAGE1_BOX_LOOKBACK_WEEKS", "12"))
+        # Keep one extra latest week for confirmation check; base itself is built on prior bars.
+        lb_total = max(min_weeks + 1, min(len(keys), lookback + 1))
+        highs = highs_all[-lb_total:]
+        lows = lows_all[-lb_total:]
+        closes = closes_all[-lb_total:]
+        vols = vols_all[-lb_total:]
+        if highs.size < (min_weeks + 1) or lows.size < (min_weeks + 1):
+            return False, int(highs.size), 0.0, False, 0.0, False, 0.0, False
+        base_highs = highs[:-1]
+        base_lows = lows[:-1]
+        base_closes = closes[:-1]
+        base_vols = vols[:-1]
+        curr_close = float(closes[-1])
+        curr_vol = float(vols[-1])
+        if base_highs.size < min_weeks or base_lows.size < min_weeks:
+            return False, int(base_highs.size), 0.0, False, 0.0, False, 0.0, False
+        ceiling = float(np.percentile(base_highs, 90))
+        floor = float(np.percentile(base_lows, 10))
+        if floor <= 0 or ceiling <= floor:
+            return False, int(base_highs.size), 0.0, False, 0.0, False, 0.0, False
+        box_range = (ceiling - floor) / floor
+        max_range = float(os.getenv("STAGE1_BOX_MAX_RANGE_PCT", "0.16"))
+        tol = float(os.getenv("STAGE1_BOX_TOUCH_TOL_PCT", "0.015"))
+        min_touches = int(os.getenv("STAGE1_BOX_MIN_TOUCHES", "3"))
+        top_touches = int(np.sum(base_highs >= ceiling * (1.0 - tol)))
+        bot_touches = int(np.sum(base_lows <= floor * (1.0 + tol)))
+        # Volume dry-up: recent weekly activity falls vs earlier base weeks.
+        # Example default: average of last 3 weeks <= 75% of prior 5 weeks average.
+        tail_w = int(os.getenv("STAGE1_VOL_DRYUP_RECENT_WEEKS", "3"))
+        base_w = int(os.getenv("STAGE1_VOL_DRYUP_BASE_WEEKS", "5"))
+        tail_w = max(2, min(tail_w, len(base_vols)))
+        base_w = max(3, min(base_w, max(0, len(base_vols) - tail_w)))
+        dry_ratio = 1.0
+        vol_dry = False
+        if base_w >= 3 and tail_w >= 2 and len(base_vols) >= (tail_w + base_w):
+            recent = float(np.mean(base_vols[-tail_w:]))
+            base = float(np.mean(base_vols[-(tail_w + base_w):-tail_w]))
+            if base > 0:
+                dry_ratio = recent / base
+                thr = float(os.getenv("STAGE1_VOL_DRYUP_RATIO_MAX", "0.65"))
+                vol_dry = dry_ratio <= thr
+        # Keep dry-up as required by default; can disable with env if needed.
+        need_dry = os.getenv("STAGE1_REQUIRE_VOL_DRYUP", "true").strip().lower() in ("1", "true", "yes")
+        dry_ok = vol_dry if need_dry else True
+
+        # 30-week MA flatness near current price:
+        # abs(curr_close - MA30) / curr_close <= 5% (configurable)
+        ma_len = int(os.getenv("STAGE1_MA_FLAT_LEN_WEEKS", "30"))
+        ma_len_eff = max(5, min(ma_len, len(base_closes)))
+        ma30 = float(np.mean(base_closes[-ma_len_eff:])) if ma_len_eff > 0 else 0.0
+        ma_dev = abs(curr_close - ma30) / max(curr_close, 1e-9) if curr_close > 0 else 999.0
+        ma_flat_thr = float(os.getenv("STAGE1_MA_FLAT_MAX_DEV_PCT", "0.04"))
+        ma_flat = ma_dev <= ma_flat_thr
+        need_ma_flat = os.getenv("STAGE1_REQUIRE_MA_FLAT", "true").strip().lower() in ("1", "true", "yes")
+        ma_ok = ma_flat if need_ma_flat else True
+
+        is_box = (
+            (box_range <= max_range)
+            and (top_touches >= min_touches)
+            and (bot_touches >= min_touches)
+            and (base_highs.size >= min_weeks)
+            and dry_ok
+            and ma_ok
+        )
+        # Stage-2 confirmation candidate from this weekly base:
+        # latest close breaks above base ceiling and latest weekly volume expands vs prior 10w.
+        vol_exp_mult = float(os.getenv("STAGE2_CONFIRM_VOL_EXP_MULT", "1.5"))
+        breakout_buf = float(os.getenv("STAGE2_CONFIRM_BREAKOUT_BUFFER_PCT", "0.0"))
+        wk_break = bool(curr_close > (ceiling * (1.0 + breakout_buf)))
+        wk_vol_exp = False
+        if len(base_vols) >= 10:
+            vbase = float(np.mean(base_vols[-10:]))
+            if vbase > 0:
+                wk_vol_exp = bool(curr_vol >= (vol_exp_mult * vbase))
+        stage2_confirm = bool(is_box and wk_break and wk_vol_exp)
+        return (
+            bool(is_box),
+            int(highs.size),
+            float(box_range),
+            bool(vol_dry),
+            float(dry_ratio),
+            bool(ma_flat),
+            float(ma_dev),
+            bool(stage2_confirm),
+        )
+    except Exception:
+        return False, 0, 0.0, False, 0.0, False, 0.0, False
+
+
 def _sma_last(values: np.ndarray, n: int) -> float:
     if values.size < n or n <= 0:
         return float("nan")
@@ -154,6 +289,64 @@ def main_loop_helper(self):
                 # 2. MRS signal line (SMA of length mrs_signal_period)
                 mrs_deque = self._mrs_history_buffers[s]["mrs"]
                 mrs_signal = compute_mrs_signal_line(mrs_deque, mrs_period)
+                hv = self.buffers[s].get_ordered_view()
+                # Daily EMA30 context for pullback/pierce filters.
+                try:
+                    if hv is not None and len(hv) >= 2:
+                        cser = np.asarray(hv[:, 4], dtype=np.float64)
+                        e30 = _ema_series(cser, 30)
+                        ema30_val = float(e30[-1]) if e30.size else float("nan")
+                        ema30_prev = float(e30[-2]) if e30.size >= 2 else float("nan")
+                        prev_close = float(cser[-2]) if cser.size >= 2 else float("nan")
+                    else:
+                        ema30_val = float("nan")
+                        ema30_prev = float("nan")
+                        prev_close = float("nan")
+                except Exception:
+                    ema30_val = float("nan")
+                    ema30_prev = float("nan")
+                    prev_close = float("nan")
+                with self.lock:
+                    self.results[s]["ema30"] = ema30_val
+                    self.results[s]["ema30_prev"] = ema30_prev
+                    self.results[s]["prev_close"] = prev_close
+
+                # 2.4 Stage-1 price box (8+ week accumulation base)
+                box_refresh = float(os.getenv("STAGE1_BOX_REFRESH_SEC", "120"))
+                if not hasattr(self, "_stage1_box_cache"):
+                    self._stage1_box_cache = {}
+                box_cached = self._stage1_box_cache.get(s)
+                if box_cached and (time.time() - float(box_cached.get("ts", 0.0))) < box_refresh:
+                    box_flag = bool(box_cached.get("flag", False))
+                    box_weeks = int(box_cached.get("weeks", 0))
+                    box_range = float(box_cached.get("range", 0.0))
+                    vol_dry = bool(box_cached.get("vol_dry", False))
+                    vol_dry_ratio = float(box_cached.get("vol_dry_ratio", 0.0))
+                    ma_flat = bool(box_cached.get("ma_flat", False))
+                    ma_dev = float(box_cached.get("ma_dev", 0.0))
+                    stage2_confirm = bool(box_cached.get("stage2_confirm", False))
+                else:
+                    box_flag, box_weeks, box_range, vol_dry, vol_dry_ratio, ma_flat, ma_dev, stage2_confirm = _stage1_price_box_from_ohlcv(hv)
+                    self._stage1_box_cache[s] = {
+                        "ts": time.time(),
+                        "flag": bool(box_flag),
+                        "weeks": int(box_weeks),
+                        "range": float(box_range),
+                        "vol_dry": bool(vol_dry),
+                        "vol_dry_ratio": float(vol_dry_ratio),
+                        "ma_flat": bool(ma_flat),
+                        "ma_dev": float(ma_dev),
+                        "stage2_confirm": bool(stage2_confirm),
+                    }
+                with self.lock:
+                    self.results[s]["stage1_box"] = bool(box_flag)
+                    self.results[s]["stage1_box_weeks"] = int(box_weeks)
+                    self.results[s]["stage1_box_range"] = float(box_range)
+                    self.results[s]["stage1_vol_dry"] = bool(vol_dry)
+                    self.results[s]["stage1_vol_dry_ratio"] = float(vol_dry_ratio)
+                    self.results[s]["stage1_ma_flat"] = bool(ma_flat)
+                    self.results[s]["stage1_ma_dev"] = float(ma_dev)
+                    self.results[s]["stage2_confirm"] = bool(stage2_confirm)
 
                 # 2.5. RVCR (weekly-style): match TradingView weekly pane.
                 # - Compute weekly Mansfield mRS series from daily history buffer (hv) + benchmark (b_vw).
@@ -173,11 +366,12 @@ def main_loop_helper(self):
                     with self.lock:
                         self.results[s]["mrs_rcvr"] = bool(cached.get("flag", False))
                         self.results[s]["mrs_rcvr_slope"] = float(cached.get("slope", 0.0))
+                        self.results[s]["mrs_neg_ma10_rising"] = bool(cached.get("neg_ma10_rising", False))
                 else:
                     flag = False
                     slope_val = 0.0
+                    neg_ma10_rising = False
                     try:
-                        hv = self.buffers[s].get_ordered_view()
                         wk_s = _weekly_close_map_from_ohlcv(hv)
                         wk_b = _weekly_close_map_from_ohlcv(b_vw) if b_vw is not None else {}
                         if wk_s and wk_b:
@@ -201,6 +395,11 @@ def main_loop_helper(self):
                                     for i2 in range(ma_eff - 1, ratio.size):
                                         avg[i2] = (csum[i2 + 1] - csum[i2 + 1 - ma_eff]) / float(ma_eff)
                                 mrs_series = np.nan_to_num(((ratio / (avg + 1e-12)) - 1.0) * 10.0, nan=0.0)
+                                if mrs_series.size >= 11:
+                                    ma10_now = float(np.mean(mrs_series[-10:]))
+                                    ma10_prev = float(np.mean(mrs_series[-11:-1]))
+                                    mrs_now = float(mrs_series[-1])
+                                    neg_ma10_rising = (mrs_now < 0.0) and (ma10_now > ma10_prev)
 
                                 # Signal line (SMA of mRS)
                                 sig = np.full_like(mrs_series, np.nan, dtype=np.float64)
@@ -236,11 +435,18 @@ def main_loop_helper(self):
                     except Exception:
                         flag = False
                         slope_val = 0.0
+                        neg_ma10_rising = False
 
-                    self._rvcr_weekly_cache[s] = {"ts": now_ts, "flag": bool(flag), "slope": float(slope_val)}
+                    self._rvcr_weekly_cache[s] = {
+                        "ts": now_ts,
+                        "flag": bool(flag),
+                        "slope": float(slope_val),
+                        "neg_ma10_rising": bool(neg_ma10_rising),
+                    }
                     with self.lock:
                         self.results[s]["mrs_rcvr"] = bool(flag)
                         self.results[s]["mrs_rcvr_slope"] = float(slope_val)
+                        self.results[s]["mrs_neg_ma10_rising"] = bool(neg_ma10_rising)
 
                 # Latch RVCR while mRS is below zero so Stage-1 candidates do not flicker.
                 with self.lock:
@@ -260,8 +466,10 @@ def main_loop_helper(self):
                     "mrs_prev": float(row['mrs_prev']) if 'mrs_prev' in row.dtype.names else current_mrs,
                     "mrs_signal": mrs_signal,
                     "mrs_rcvr": bool(self.results[s].get("mrs_rcvr", False)),
+                    "stage1_box": bool(self.results[s].get("stage1_box", False)),
+                    "mrs_neg_ma10_rising": bool(self.results[s].get("mrs_neg_ma10_rising", False)),
+                    "stage2_confirm": bool(self.results[s].get("stage2_confirm", False)),
                 }
-                hv = self.buffers[s].get_ordered_view()
                 try:
                     res = calculate_breakout_signals(s, hv, b_vw, p)
                     if res:
@@ -750,6 +958,9 @@ def format_ui_row(d):
         'rv': f"{rv:.2f}", 'rv_color': "#00FF00" if rv >= 1.5 else "#D1D1D1",
         'trend_text': "UP" if d.get('trend_up') else "DOWN", 'trend_color': "#00FF00" if d.get('trend_up') else "#FF3131",
         'ema_str': f"{d.get('ema_f_val',0.0):.1f}/{d.get('ema_s_val',0.0):.1f}",
+        'ema30': float(d.get("ema30", 0.0) or 0.0),
+        'ema30_prev': float(d.get("ema30_prev", 0.0) or 0.0),
+        'prev_close_num': float(d.get("prev_close", 0.0) or 0.0),
         'ema_color': "#00FF00" if d.get('trend_up') else "#D1D1D1", 'pc': f"{d.get('prev_close',0.0):.2f}",
         'mrs_weekly': f"{mrs:.2f}",
         'mrs_color': "#00FF00" if mrs > 0 else ("#FF3131" if mrs < 0 else "#D1D1D1"),

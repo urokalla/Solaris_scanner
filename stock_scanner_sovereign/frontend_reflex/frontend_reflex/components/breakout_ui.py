@@ -25,6 +25,8 @@ def breakout_header():
 def breakout_sidebar():
     brk_options = [
         "ALL",
+        "STAGE2_CONFIRMED",
+        "EMA30_PULLBACK_LT50_NO_SME",
         "BUY NOW",
         "BREAKOUT",
         "NEAR BRK",

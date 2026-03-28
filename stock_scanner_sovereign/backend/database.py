@@ -60,11 +60,27 @@ class DatabaseManager:
         if DatabaseManager._pool is None:
             logger.error("Database connection pool not initialized. Is the database service running?")
             raise ConnectionError("Database not ready.")
-        conn = DatabaseManager._pool.getconn()
+        conn = None
         try:
+            conn = DatabaseManager._pool.getconn()
+            # Pool can hand out stale/closed sockets after Postgres restart.
+            if conn is None or getattr(conn, "closed", 1) != 0:
+                try:
+                    if conn is not None:
+                        DatabaseManager._pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = DatabaseManager._pool.getconn()
             yield conn
         finally:
-            DatabaseManager._pool.putconn(conn)
+            try:
+                if conn is not None:
+                    if getattr(conn, "closed", 1) == 0:
+                        DatabaseManager._pool.putconn(conn)
+                    else:
+                        DatabaseManager._pool.putconn(conn, close=True)
+            except Exception:
+                pass
 
     def get_historical_data(self, symbol, timeframe, limit=365):
         q = "SELECT timestamp, open, high, low, close, volume FROM prices WHERE symbol=%s AND timeframe=%s ORDER BY timestamp DESC LIMIT %s"
@@ -209,10 +225,18 @@ class DatabaseManager:
                         conn.commit()
                         return
                     except Exception:
-                        conn.rollback()
+                        try:
+                            if conn is not None and getattr(conn, "closed", 1) == 0:
+                                conn.rollback()
+                        except Exception:
+                            pass
                         raise
             except Exception as e:
-                if _is_deadlock_exception(e) and attempt < 4:
+                emsg = str(e).lower()
+                is_conn_drop = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)) or (
+                    "connection already closed" in emsg or "server closed the connection" in emsg
+                )
+                if (_is_deadlock_exception(e) or is_conn_drop) and attempt < 4:
                     time.sleep(0.05 * (2**attempt))
                     continue
                 logger.error("Database: upsert_brk_lvls failed: %s", e, exc_info=True)
