@@ -51,6 +51,47 @@ def month_end_close(daily_close: pd.Series) -> pd.Series:
     return daily_close.resample("ME").last().dropna()
 
 
+def week_end_close(daily_close: pd.Series) -> pd.Series:
+    """
+    Last daily close per ISO week (label = Friday, **Asia/Kolkata**).
+
+    The **current** week’s bucket is the latest daily close available in that week (Connors-style
+    weekly RSI uses completed weeks; blending today’s LTP into daily closes feeds this bucket).
+    """
+    if daily_close.empty:
+        return daily_close
+    s = daily_close.astype(float).sort_index()
+    if s.index.tz is None:
+        s = s.tz_localize("UTC")
+    s_ist = s.tz_convert("Asia/Kolkata")
+    return s_ist.resample("W-FRI", label="right", closed="right").last().dropna()
+
+
+def latest_weekly_rsi2(
+    daily_close: pd.Series, *, period: int = 2
+) -> tuple[pd.Timestamp, float, pd.Timestamp, float] | None:
+    """
+    Wilder RSI(period) on ``week_end_close`` (IST week buckets).
+
+    Returns
+        (week_bucket_label, rsi_value, last_daily_ts, last_daily_close)
+    """
+    if daily_close.empty:
+        return None
+    asof_ts = daily_close.index[-1]
+    asof_c = float(daily_close.iloc[-1])
+    w = week_end_close(daily_close)
+    if len(w) < period + 2:
+        return None
+    r = rsi_wilder(w, period=period)
+    if r.empty:
+        return None
+    last = r.iloc[-1]
+    if pd.isna(last):
+        return None
+    return r.index[-1], float(last), asof_ts, asof_c
+
+
 def latest_monthly_rsi2(
     daily_close: pd.Series, *, period: int = 2
 ) -> tuple[pd.Timestamp, float, pd.Timestamp, float] | None:

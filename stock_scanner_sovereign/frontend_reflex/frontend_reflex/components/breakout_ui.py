@@ -38,15 +38,24 @@ def breakout_sidebar():
     mrs_grid_options = ["ALL", "BUY NOW", "TRENDING", "NOT TRENDING"]
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
-        rx.vstack(
-            rx.foreach(UNIVERSE_OPTIONS, lambda u: rx.button(
-                u, on_click=lambda: BreakoutState.set_universe(u), variant="ghost",
-                color=rx.cond(BreakoutState.universe == u, "#FFB000", "#D1D1D1"), width="100%", text_align="left",
-                justify_content="start", padding_x="15px", height="30px", font_size="12px",
-                font_weight=rx.cond(BreakoutState.universe == u, "bold", "normal"),
-                background_color=rx.cond(BreakoutState.universe == u, "rgba(255,176,0,0.1)", "transparent"),
-                _hover={"background_color": "rgba(255,255,255,0.05)"}
-            )), width="100%", spacing="0"
+        rx.box(
+            rx.select(
+                UNIVERSE_OPTIONS,
+                value=BreakoutState.universe,
+                on_change=BreakoutState.set_universe,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                height="32px",
+                font_size="12px",
+                margin_left="15px",
+                margin_right="15px",
+                _focus={"border_color": "#FFB000"},
+            ),
+            width="100%",
         ),
         rx.box(height="8px"),
         rx.text("FILTERS", size="1", color="#D1D1D1", font_weight="bold", padding="8px 15px 4px 15px"),

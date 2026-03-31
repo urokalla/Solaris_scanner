@@ -129,8 +129,9 @@ class MasterScanner:
         try:
             self.db.ensure_live_state_brk_column()
             self.db.ensure_mrs_prev_day_column()
+            self.db.ensure_w_rsi2_column()
         except Exception as e:
-            logger.warning("ensure_live_state_brk_column / mrs_prev_day: %s", e)
+            logger.warning("ensure_live_state_brk_column / mrs_prev_day / w_rsi2: %s", e)
         is_master = os.getenv("SHM_MASTER", "true").lower() == "true"
         self.shm.setup(is_master_hint=is_master)
         
@@ -208,6 +209,10 @@ class MasterScanner:
         self._last_tick_seen_ts: float = 0.0
         self._last_targeted_resub_ts: float = 0.0
         self._last_stale_resub_ts: float = 0.0
+        # Weekly RSI(2) for main dashboard (Parquet + optional LTP blend → live_state.w_rsi2).
+        self._w_rsi2_ts: float = 0.0
+        self._w_rsi2_thread: Optional[threading.Thread] = None
+        self._pipeline_bridge = None
         # Per-symbol stale resub cooldown to avoid hammering the same illiquid names.
         self._stale_resub_sym_ts: dict[str, float] = {}
         # Last successful full WS subscribe list (Fyers SDK clears symbol_token on reconnect without resubscribing).
@@ -621,6 +626,83 @@ class MasterScanner:
         except Exception:
             pass
 
+    def _pipeline_bridge_lazy(self):
+        if self._pipeline_bridge is None:
+            from utils.pipeline_bridge import PipelineBridge
+
+            self._pipeline_bridge = PipelineBridge()
+        return self._pipeline_bridge
+
+    def _maybe_refresh_w_rsi2_background(self):
+        from config.settings import settings
+
+        if not getattr(settings, "DASHBOARD_W_RSI2", True):
+            return
+        if os.getenv("SHM_MASTER", "true").lower() != "true":
+            return
+        interval = float(getattr(settings, "DASHBOARD_W_RSI2_REFRESH_SEC", 180))
+        thr = getattr(self, "_w_rsi2_thread", None)
+        if thr is not None and thr.is_alive():
+            return
+        now = time.time()
+        if self._w_rsi2_ts > 0 and (now - self._w_rsi2_ts) < interval:
+            return
+        self._w_rsi2_ts = now
+        self._w_rsi2_thread = threading.Thread(
+            target=self._w_rsi2_refresh_worker,
+            daemon=True,
+            name="dashboard-w-rsi2",
+        )
+        self._w_rsi2_thread.start()
+
+    def _w_rsi2_refresh_worker(self):
+        from config.settings import settings
+        from utils.monthly_rsi2_trade_rules import (
+            blend_last_daily_bar_with_ltp,
+            daily_close_series_from_ohlcv,
+            latest_weekly_rsi2,
+            sidecar_live_rsi2_window_ok,
+        )
+
+        try:
+            live_ok = sidecar_live_rsi2_window_ok(
+                hour=settings.DASHBOARD_W_RSI2_LIVE_IST_HOUR,
+                minute=settings.DASHBOARD_W_RSI2_LIVE_IST_MINUTE,
+            )
+            rows: list[tuple[str, float]] = []
+            bridge = self._pipeline_bridge_lazy()
+            for sym in self.symbols:
+                if not str(sym).endswith("-EQ"):
+                    continue
+                try:
+                    d_hist = bridge.get_historical_data(sym, limit=800)
+                    if d_hist is None or len(d_hist) < 80:
+                        d_hist = self.db.get_historical_data(sym, "1d", limit=800)
+                    if d_hist is None or len(d_hist) < 80:
+                        continue
+                    base = daily_close_series_from_ohlcv(np.asarray(d_hist))
+                    if base is None:
+                        continue
+                    lp = 0.0
+                    idx = self.sym_to_idx.get(sym)
+                    if idx is not None and 0 <= idx < len(self.shm.arr):
+                        lp = float(self.shm.arr[idx]["ltp"])
+                    series = base
+                    if live_ok and lp > 0:
+                        series = blend_last_daily_bar_with_ltp(base, lp)
+                    lr = latest_weekly_rsi2(series, period=2)
+                    if lr:
+                        rows.append((sym, float(lr[1])))
+                except Exception:
+                    continue
+            if rows:
+                self.db.upsert_w_rsi2(rows)
+                logger.info("📊 [Dashboard] w_rsi2 updated for %s symbols", len(rows))
+        except Exception:
+            logger.exception("w_rsi2 refresh worker failed")
+        finally:
+            self._w_rsi2_ts = time.time()
+
     def _compute_grid_status(self, sym: str, prev_mrs: float, new_mrs: float, mrs_prev_day: Optional[float]) -> bytes:
         """
         BUY NOW: session-latched after weekly mRS crosses above 0, or first day above 0 vs prior EOD <= 0.
@@ -814,7 +896,7 @@ class MasterScanner:
         """Standard JSON-view for the dashboard (Paginated + Filtered)"""
         try:
             filters = filters or {}
-            logger.info(f"📊 UI Request -> Page: {page}, Size: {page_size}, Filters: {filters}")
+            logger.debug("📊 UI Request -> Page: %s, Size: %s, Filters: %s", page, page_size, filters)
 
             # Step 1: Universal Load (Trust the Index Map before filtering)
             valid_symbols = set(self.symbols)
@@ -859,6 +941,27 @@ class MasterScanner:
                     self._last_u_name = univ
 
             valid_symbols = getattr(self, '_valid_symbols_cache', set(self.symbols))
+
+            sector = filters.get("sector", "(All)")
+            s_lab = str(sector or "").strip()
+            if s_lab and s_lab.upper() not in ("(ALL)", "ALL"):
+                from utils.screener_market_symbols import symbol_nks_for_dashboard_sector
+
+                snks = symbol_nks_for_dashboard_sector(s_lab)
+                if snks:
+
+                    def _nk_sect(x: str) -> str:
+                        t = str(x or "").upper().strip()
+                        if ":" in t:
+                            t = t.split(":", 1)[1]
+                        t = t.replace("-INDEX", "")
+                        if "-" in t:
+                            t = t.rsplit("-", 1)[0]
+                        import re as _re
+
+                        return _re.sub(r"[^A-Z0-9]", "", t)
+
+                    valid_symbols = {s for s in valid_symbols if _nk_sect(s) in snks}
             
             # Step 3: O(1) Memory Extraction + Dashboard Filtering
             # Iterate canonical symbol indices only — NOT full shm.arr (10k rows). Scanning all rows
@@ -948,7 +1051,8 @@ class MasterScanner:
                     "rv_num": rv_v,
                     "price_up": bool(r['price_up']),
                     "price_down": bool(r['price_down']),
-                    "rv_up": bool(rv_v >= 1.5),
+                    # UI: high RVOL on a down day must not use "up" green (rv_up was only rv>=1.5, so it won rv_down).
+                    "rv_up": bool(rv_v >= 1.5 and ch_pct > 0),
                     "rv_down": bool(rv_v >= 1.5 and ch_pct < 0),
                     "mrs_slope_4w": slope4,
                     "mrs_mansfield_slope": m_slope,
@@ -986,7 +1090,20 @@ class MasterScanner:
                 for d in data:
                     d["mrs_prev_day"] = None
                     d["mrs_prev_day_str"] = "—"
-            
+            try:
+                self.db.ensure_w_rsi2_column()
+                syms_w = [d["symbol"] for d in data]
+                wm = self.db.get_w_rsi2_map(syms_w) if syms_w else {}
+                for d in data:
+                    v = wm.get(d["symbol"])
+                    d["w_rsi2"] = v
+                    d["w_rsi2_str"] = f"{v:.1f}" if v is not None else "—"
+            except Exception as ex:
+                logger.warning("w_rsi2 merge on main grid: %s", ex)
+                for d in data:
+                    d["w_rsi2"] = None
+                    d["w_rsi2_str"] = "—"
+
             sort_key = str(filters.get("sort_key") or "rs_rating").strip().lower()
             sort_desc = bool(filters.get("sort_desc", True))
 
@@ -999,6 +1116,19 @@ class MasterScanner:
                     return float(row["mrs_daily"])
                 if sort_key in ("rv", "rvol"):
                     return float(row.get("rv_num", 0.0))
+                if sort_key in ("w_rsi2", "wrsi2", "wr"):
+                    x = row.get("w_rsi2")
+                    return float(x) if x is not None else -1.0
+                if sort_key in ("chg", "ch_pct", "change_pct", "p1d"):
+                    return float(row.get("ch_pct", 0.0))
+                if sort_key in ("ltp", "price"):
+                    return float(row.get("ltp", 0.0))
+                if sort_key in ("brk", "brk_lvl", "pivot"):
+                    x = row.get("brk_lvl")
+                    return float(x) if x is not None else float("-inf")
+                if sort_key in ("mrs_prev_day", "prev_mrs", "prev"):
+                    x = row.get("mrs_prev_day")
+                    return float(x) if x is not None else float("-inf")
                 if sort_key in ("sym", "symbol", "ticker"):
                     return str(row["symbol"])
                 if sort_key in ("st", "status"):
@@ -1470,6 +1600,7 @@ class MasterScanner:
                 self._maybe_recover_dead_subscription_map()
                 self._maybe_resubscribe_unresolved_symbols()
                 self._maybe_resubscribe_stale_symbols()
+                self._maybe_refresh_w_rsi2_background()
 
                 time.sleep(5)
         except ConnectionError:

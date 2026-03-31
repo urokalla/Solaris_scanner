@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-03-30T11:58:53.304325Z",
+  "count": 2,
+  "results": [
+    {
+      "scrip": "500325",
+      "news_id": "20996d22-ffa1-4201-9bb1-d7c77ec911cc",
+      "news_dt": "2026-03-26T22:47:56.67",
+      "headline": "Statement",
+      "category": "Company Update",
+      "attachment_name": "4bc5037c-9736-40e7-a7b7-f2566f43945c.pdf",
+      "quote_url": "https://www.bseindia.com/stock-share-price/reliance-industries-ltd/reliance/500325/corp-announcements/",
+      "new_announcement": true
+    },
+    {
+      "scrip": "500378",
+      "news_id": "984fb053-bda8-4c89-a405-eed3cb63b4d2",
+      "news_dt": "2026-03-25T14:19:42.58",
+      "headline": "as attached",
+      "category": "Insider Trading / SAST",
+      "attachment_name": "07667ff3-005f-4871-9322-fa68ddea05a6.pdf",
+      "quote_url": "https://www.bseindia.com/stock-share-price/jindal-saw-ltd/jindalsaw/500378/corp-announcements/",
+      "new_announcement": true
+    }
+  ],
+  "state_file": "/home/udai/RS_PROJECT/data/bse_announcements_state.json"
+}

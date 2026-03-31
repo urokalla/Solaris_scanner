@@ -1,0 +1,295 @@
+{
+  "source": "https://www.screener.in/explore/",
+  "sectors": [
+    {
+      "label": "Aerospace & Defense",
+      "market_path": "/market/IN07/IN0702/IN070201/",
+      "code": "IN070201"
+    },
+    {
+      "label": "Agricultural Food & other Products",
+      "market_path": "/market/IN04/IN0401/IN040101/",
+      "code": "IN040101"
+    },
+    {
+      "label": "Agricultural, Commercial & Construction Vehicles",
+      "market_path": "/market/IN07/IN0702/IN070202/",
+      "code": "IN070202"
+    },
+    {
+      "label": "Auto Components",
+      "market_path": "/market/IN02/IN0201/IN020102/",
+      "code": "IN020102"
+    },
+    {
+      "label": "Automobiles",
+      "market_path": "/market/IN02/IN0201/IN020101/",
+      "code": "IN020101"
+    },
+    {
+      "label": "Banks",
+      "market_path": "/market/IN05/IN0501/IN050102/",
+      "code": "IN050102"
+    },
+    {
+      "label": "Beverages",
+      "market_path": "/market/IN04/IN0401/IN040102/",
+      "code": "IN040102"
+    },
+    {
+      "label": "Capital Markets",
+      "market_path": "/market/IN05/IN0501/IN050103/",
+      "code": "IN050103"
+    },
+    {
+      "label": "Cement & Cement Products",
+      "market_path": "/market/IN01/IN0102/IN010203/",
+      "code": "IN010203"
+    },
+    {
+      "label": "Chemicals & Petrochemicals",
+      "market_path": "/market/IN01/IN0101/IN010101/",
+      "code": "IN010101"
+    },
+    {
+      "label": "Cigarettes & Tobacco Products",
+      "market_path": "/market/IN04/IN0401/IN040103/",
+      "code": "IN040103"
+    },
+    {
+      "label": "Commercial Services & Supplies",
+      "market_path": "/market/IN09/IN0901/IN090104/",
+      "code": "IN090104"
+    },
+    {
+      "label": "Construction",
+      "market_path": "/market/IN07/IN0701/IN070101/",
+      "code": "IN070101"
+    },
+    {
+      "label": "Consumable Fuels",
+      "market_path": "/market/IN03/IN0301/IN030104/",
+      "code": "IN030104"
+    },
+    {
+      "label": "Consumer Durables",
+      "market_path": "/market/IN02/IN0202/IN020201/",
+      "code": "IN020201"
+    },
+    {
+      "label": "Diversified",
+      "market_path": "/market/IN12/IN1201/IN120101/",
+      "code": "IN120101"
+    },
+    {
+      "label": "Diversified FMCG",
+      "market_path": "/market/IN04/IN0401/IN040107/",
+      "code": "IN040107"
+    },
+    {
+      "label": "Diversified Metals",
+      "market_path": "/market/IN01/IN0103/IN010303/",
+      "code": "IN010303"
+    },
+    {
+      "label": "Electrical Equipment",
+      "market_path": "/market/IN07/IN0702/IN070203/",
+      "code": "IN070203"
+    },
+    {
+      "label": "Engineering Services",
+      "market_path": "/market/IN09/IN0901/IN090101/",
+      "code": "IN090101"
+    },
+    {
+      "label": "Entertainment",
+      "market_path": "/market/IN02/IN0204/IN020402/",
+      "code": "IN020402"
+    },
+    {
+      "label": "Ferrous Metals",
+      "market_path": "/market/IN01/IN0103/IN010301/",
+      "code": "IN010301"
+    },
+    {
+      "label": "Fertilizers & Agrochemicals",
+      "market_path": "/market/IN01/IN0101/IN010102/",
+      "code": "IN010102"
+    },
+    {
+      "label": "Finance",
+      "market_path": "/market/IN05/IN0501/IN050101/",
+      "code": "IN050101"
+    },
+    {
+      "label": "Financial Technology (Fintech)",
+      "market_path": "/market/IN05/IN0501/IN050105/",
+      "code": "IN050105"
+    },
+    {
+      "label": "Food Products",
+      "market_path": "/market/IN04/IN0401/IN040104/",
+      "code": "IN040104"
+    },
+    {
+      "label": "Gas",
+      "market_path": "/market/IN03/IN0301/IN030101/",
+      "code": "IN030101"
+    },
+    {
+      "label": "Healthcare Equipment & Supplies",
+      "market_path": "/market/IN06/IN0601/IN060102/",
+      "code": "IN060102"
+    },
+    {
+      "label": "Healthcare Services",
+      "market_path": "/market/IN06/IN0601/IN060103/",
+      "code": "IN060103"
+    },
+    {
+      "label": "Household Products",
+      "market_path": "/market/IN04/IN0401/IN040106/",
+      "code": "IN040106"
+    },
+    {
+      "label": "Industrial Manufacturing",
+      "market_path": "/market/IN07/IN0702/IN070204/",
+      "code": "IN070204"
+    },
+    {
+      "label": "Industrial Products",
+      "market_path": "/market/IN07/IN0702/IN070205/",
+      "code": "IN070205"
+    },
+    {
+      "label": "Insurance",
+      "market_path": "/market/IN05/IN0501/IN050104/",
+      "code": "IN050104"
+    },
+    {
+      "label": "IT - Hardware",
+      "market_path": "/market/IN08/IN0801/IN080103/",
+      "code": "IN080103"
+    },
+    {
+      "label": "IT - Services",
+      "market_path": "/market/IN08/IN0801/IN080102/",
+      "code": "IN080102"
+    },
+    {
+      "label": "IT - Software",
+      "market_path": "/market/IN08/IN0801/IN080101/",
+      "code": "IN080101"
+    },
+    {
+      "label": "Leisure Services",
+      "market_path": "/market/IN02/IN0206/IN020601/",
+      "code": "IN020601"
+    },
+    {
+      "label": "Media",
+      "market_path": "/market/IN02/IN0204/IN020401/",
+      "code": "IN020401"
+    },
+    {
+      "label": "Metals & Minerals Trading",
+      "market_path": "/market/IN01/IN0103/IN010305/",
+      "code": "IN010305"
+    },
+    {
+      "label": "Minerals & Mining",
+      "market_path": "/market/IN01/IN0103/IN010304/",
+      "code": "IN010304"
+    },
+    {
+      "label": "Non - Ferrous Metals",
+      "market_path": "/market/IN01/IN0103/IN010302/",
+      "code": "IN010302"
+    },
+    {
+      "label": "Oil",
+      "market_path": "/market/IN03/IN0301/IN030102/",
+      "code": "IN030102"
+    },
+    {
+      "label": "Other Construction Materials",
+      "market_path": "/market/IN01/IN0102/IN010204/",
+      "code": "IN010204"
+    },
+    {
+      "label": "Other Consumer Services",
+      "market_path": "/market/IN02/IN0206/IN020602/",
+      "code": "IN020602"
+    },
+    {
+      "label": "Other Utilities",
+      "market_path": "/market/IN11/IN1102/IN110201/",
+      "code": "IN110201"
+    },
+    {
+      "label": "Paper, Forest & Jute Products",
+      "market_path": "/market/IN01/IN0104/IN010401/",
+      "code": "IN010401"
+    },
+    {
+      "label": "Personal Products",
+      "market_path": "/market/IN04/IN0401/IN040105/",
+      "code": "IN040105"
+    },
+    {
+      "label": "Petroleum Products",
+      "market_path": "/market/IN03/IN0301/IN030103/",
+      "code": "IN030103"
+    },
+    {
+      "label": "Pharmaceuticals & Biotechnology",
+      "market_path": "/market/IN06/IN0601/IN060101/",
+      "code": "IN060101"
+    },
+    {
+      "label": "Power",
+      "market_path": "/market/IN11/IN1101/IN110101/",
+      "code": "IN110101"
+    },
+    {
+      "label": "Printing & Publication",
+      "market_path": "/market/IN02/IN0204/IN020403/",
+      "code": "IN020403"
+    },
+    {
+      "label": "Realty",
+      "market_path": "/market/IN02/IN0205/IN020501/",
+      "code": "IN020501"
+    },
+    {
+      "label": "Retailing",
+      "market_path": "/market/IN02/IN0206/IN020603/",
+      "code": "IN020603"
+    },
+    {
+      "label": "Telecom - Equipment & Accessories",
+      "market_path": "/market/IN10/IN1001/IN100102/",
+      "code": "IN100102"
+    },
+    {
+      "label": "Telecom - Services",
+      "market_path": "/market/IN10/IN1001/IN100101/",
+      "code": "IN100101"
+    },
+    {
+      "label": "Textiles & Apparels",
+      "market_path": "/market/IN02/IN0203/IN020301/",
+      "code": "IN020301"
+    },
+    {
+      "label": "Transport Infrastructure",
+      "market_path": "/market/IN09/IN0901/IN090103/",
+      "code": "IN090103"
+    },
+    {
+      "label": "Transport Services",
+      "market_path": "/market/IN09/IN0901/IN090102/",
+      "code": "IN090102"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI: validate universe_members vs canonical CSV. Default: Nifty 50 + Nifty 500. Use --all for 8 universes."""
+"""CLI: validate universe_members vs canonical CSV. Default: Nifty 50 + Nifty 500. Use --all for all sidebar universes."""
 import argparse
 import json
 import os
@@ -16,7 +16,7 @@ def main() -> None:
     ap.add_argument(
         "--all",
         action="store_true",
-        help="Validate all 8 sidebar universes (Nifty 50 … All NSE Stocks)",
+        help="Validate all sidebar universes (Nifty 50 … All NSE Stocks)",
     )
     args = ap.parse_args()
     names = tuple(SYMBOL_GROUPS.keys()) if args.all else None

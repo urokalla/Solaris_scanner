@@ -236,6 +236,10 @@ def main():
         logger.error("Failed to connect to Fyers API. Ensure access_token.txt exists.")
         return
 
+    years = int(os.environ.get("BACKFILL_YEARS", "5"))
+    force_rescan = os.environ.get("BACKFILL_FORCE", "").strip().lower() in ("1", "true", "yes")
+    nifty500_only = os.environ.get("BACKFILL_NIFTY500_ONLY", "").strip().lower() in ("1", "true", "yes")
+
     db = DatabaseManager()
     pq_manager = ParquetManager()
     
@@ -243,22 +247,39 @@ def main():
         # PROFESSIONAL FILTER: Only process real Stocks (-EQ) and Indices (-INDEX)
         # This automatically skips 'mislabeled symbols' and Gold Bond/Debt noise.
         today = datetime.now().date()
-        query = text("""
+        sync_filter = (
+            ""
+            if force_rescan
+            else "AND (s.last_historical_sync IS NULL OR s.last_historical_sync < :today)"
+        )
+        join_sql = (
+            "INNER JOIN universe_members um ON s.symbol_id = um.symbol_id AND um.universe_id = 'NIFTY_500'"
+            if nifty500_only
+            else "LEFT JOIN universe_members um ON s.symbol_id = um.symbol_id AND um.universe_id = 'NIFTY_500'"
+        )
+        query = text(f"""
             SELECT s.symbol_id 
             FROM symbols s
-            LEFT JOIN universe_members um ON s.symbol_id = um.symbol_id AND um.universe_id = 'NIFTY_500'
+            {join_sql}
             WHERE s.is_active = TRUE 
             AND (s.symbol_id LIKE '%-EQ' OR s.symbol_id LIKE '%-INDEX')
-            AND (s.last_historical_sync IS NULL OR s.last_historical_sync < :today)
+            {sync_filter}
             ORDER BY 
                 CASE WHEN s.symbol_id LIKE '%INDEX%' OR s.symbol_id LIKE '%IDX%' THEN 0 ELSE 1 END ASC,
                 CASE WHEN um.universe_id IS NOT NULL THEN 0 ELSE 1 END ASC,
                 s.last_historical_sync ASC NULLS FIRST
         """)
-        result = session.execute(query, {"today": today}).fetchall()
+        params = {} if force_rescan else {"today": today}
+        result = session.execute(query, params).fetchall()
         symbols = [r[0] for r in result]
 
-    logger.info(f"Backfill: Processing {len(symbols)} symbols in parallel.")
+    logger.info(
+        "Backfill: %d symbols | years=%d | NIFTY500_only=%s | force_rescan=%s",
+        len(symbols),
+        years,
+        nifty500_only,
+        force_rescan,
+    )
     
     def process_symbol(symbol):
         try:
@@ -268,7 +289,7 @@ def main():
                 conn,
                 pq_manager,
                 symbol,
-                years=5,
+                years=years,
                 max_retries=retry_count,
                 max_rate_limit_retries=5,
             )
@@ -288,7 +309,13 @@ def main():
 
     # Fyers REST history is aggressively rate-limited; 5 workers routinely trips limits.
     with ThreadPoolExecutor(max_workers=2) as executor:
-        list(tqdm(executor.map(process_symbol, symbols), total=len(symbols), desc="5-Year Heavy Sync"))
+        list(
+            tqdm(
+                executor.map(process_symbol, symbols),
+                total=len(symbols),
+                desc=f"{years}y Heavy Sync",
+            )
+        )
 
 if __name__ == "__main__":
     main()

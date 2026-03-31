@@ -1,4 +1,10 @@
 # Optimized for 12-Core / 8GB RAM System
+#
+# If the host fans spin / WSL dies: (1) Docker Desktop → Settings → Resources — lower CPUs & RAM.
+# (2) `docker compose stop pipeline` when you are not backfilling/EOD (scanner still runs).
+# (3) Never run `monitoring` profile on a small machine — cAdvisor is heavy.
+#
+# Per-service `cpus` / `mem_limit` are enforced by `docker compose` (Compose spec); they cap storms.
 services:
   # LAYER 1: Database (Metadata & Persistence)
   db:
@@ -14,9 +20,11 @@ services:
     # Host-side scripts (eod_sync, etc.) use DB_HOST=localhost — bind loopback only
     ports:
       - "127.0.0.1:5432:5432"
+    cpus: "1.0"
+    mem_limit: 1g
     networks:
       - sovereign_net
-    command: ["postgres", "-c", "max_connections=300"]
+    command: ["postgres", "-c", "max_connections=150"]
     deploy:
       resources:
         limits:
@@ -59,6 +67,8 @@ services:
       - PIPELINE_DATA_DIR=/app/data/historical
       - BACKFILL_IST_HOUR=1
       - BACKFILL_IST_MINUTE=0
+    cpus: "1.0"
+    mem_limit: 1536m
     networks:
       - sovereign_net
 
@@ -93,6 +103,8 @@ services:
       - PIPELINE_DATA_DIR=/app/data/historical
     working_dir: /app/stock_scanner_sovereign
     command: ["python3", "-m", "backend.scanner"]
+    cpus: "1.5"
+    mem_limit: 2g
     networks:
       - sovereign_net
 
@@ -120,8 +132,13 @@ services:
       - PYTHONPATH=/app/stock_scanner_sovereign
       - PIPELINE_DATA_DIR=/app/fyers_data_pipeline/data/historical
       - SIDECAR_UDAI_PINE=${SIDECAR_UDAI_PINE:-1}
+      # Breakout loop default was 0.5s (~constant CPU); 1.25s cuts load; raise if you need snappier BRK columns.
+      - SIDECAR_LOOP_SLEEP_SEC=${SIDECAR_LOOP_SLEEP_SEC:-1.25}
+      - SIDECAR_SYNC_WORKERS=${SIDECAR_SYNC_WORKERS:-6}
     working_dir: /app/stock_scanner_sovereign
     command: ["python3", "sidecar.py"]
+    cpus: "0.5"
+    mem_limit: 768m
     networks:
       - sovereign_net
 
@@ -155,6 +172,10 @@ services:
       - PIPELINE_DATA_DIR=/app/data/historical
       # Udai Pine column: set SIDECAR_UDAI_PINE=0 in .env to disable
       - SIDECAR_UDAI_PINE=${SIDECAR_UDAI_PINE:-1}
+      # Main grid poll interval (default was 2.5s); 4s lowers Reflex + get_ui_view CPU a bit.
+      - DASHBOARD_POLL_INTERVAL_SEC=${DASHBOARD_POLL_INTERVAL_SEC:-4}
+    cpus: "0.8"
+    mem_limit: 1g
     networks:
       - sovereign_net
     deploy:
@@ -167,6 +188,28 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+
+  # NSE → nse_corporate_announcements.csv every 1 hour by default (Events reads CSV only).
+  events_snapshot_cron:
+    build:
+      context: .
+      dockerfile: stock_scanner_sovereign/frontend_reflex/Dockerfile
+    container_name: sovereign_events_snapshot_cron
+    restart: always
+    user: "1000:1000"
+    volumes:
+      - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
+    working_dir: /app/stock_scanner_sovereign
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Seconds between runs (default 3600 = 1 hour)
+      - EVENTS_FETCH_INTERVAL_SEC=${EVENTS_FETCH_INTERVAL_SEC:-3600}
+      - EVENTS_FETCH_DAYS=${EVENTS_FETCH_DAYS:-7}
+    command: ["sh", "/app/stock_scanner_sovereign/scripts/docker_events_fetch_loop.sh"]
+    cpus: "0.15"
+    mem_limit: 384m
+    networks:
+      - sovereign_net
 
   # --- Monitoring (Grafana + Prometheus) ---
   # Omit from default `docker compose up -d` to avoid extra image pulls.

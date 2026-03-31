@@ -1,11 +1,15 @@
 import asyncio, time, pandas as pd, io, reflex as rx
+from config.settings import settings
 from .engine import get_scanner
+
 async def poll_results_handler(self):
+    interval = max(1.0, float(settings.DASHBOARD_POLL_INTERVAL_SEC))
     while True:
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(interval)
         async with self:
             filters = {
                 "universe": self.universe,
+                "sector": self.dashboard_sector,
                 "benchmark": self.benchmark,
                 "search": self.search_query,
                 "profile": self.filter_profile,
@@ -30,8 +34,12 @@ async def poll_results_handler(self):
 
 def download_excel_logic(results):
     df = pd.DataFrame(results)
-    cols = ["symbol", "ltp", "rs_rating", "mrs", "mrs_prev_day_str", "rv", "profile", "status"]
-    df = df[cols].copy(); df.columns = ["TICKER", "PRICE", "RS_RATING", "W_mRS", "PREV_W_mRS", "RVOL", "PROFILE", "STATUS"]
+    cols = ["symbol", "ltp", "rs_rating", "mrs", "mrs_prev_day_str", "mrs_daily_str", "w_rsi2_str", "rv", "profile", "status"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = "—"
+    df = df[cols].copy()
+    df.columns = ["TICKER", "PRICE", "RS_RATING", "W_mRS", "PREV_W_mRS", "D_mRS", "W_RSI2", "RVOL", "PROFILE", "STATUS"]
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df.to_excel(writer, index=False, sheet_name='Solaris')
     return rx.download(data=output.getvalue(), filename=f"Solaris_Export_{time.strftime('%H%M')}.xlsx")

@@ -32,7 +32,12 @@ BENCHMARK_MAP = {
     "Nifty 50": "NSE:NIFTY50-INDEX",
     "Nifty 100": "NSE:NIFTY100-INDEX",
     "Nifty 500": "NSE:NIFTY500-INDEX",
+    "Nifty 500 Healthcare": "NSE:NIFTY500-INDEX",
+    # Nifty Total Market (~750): same RS bench as broad equities until a dedicated index slot exists.
+    "Nifty Total Market": "NSE:NIFTY500-INDEX",
     "Nifty Midcap 100": "NSE:NIFTYMIDCAP100-INDEX",
+    # Midcap 150: use NIFTY500 bench for RS until a dedicated NIFTYMIDCAP150 parquet/slot exists.
+    "Nifty Midcap 150": "NSE:NIFTY500-INDEX",
     "Nifty Smallcap 100": "NSE:NIFTYSMLCAP100-INDEX",
     "Nifty Smallcap 250": "NSE:NIFTY500-INDEX",
     "SME List": "NSE:NIFTY500-INDEX",
@@ -45,7 +50,10 @@ SYMBOL_GROUPS = {
     "Nifty 50": "data/nifty50.csv",
     "Nifty 100": "data/nifty100.csv",
     "Nifty 500": "data/nifty500.csv",
+    "Nifty 500 Healthcare": "data/nifty500_healthcare.csv",
+    "Nifty Total Market": "data/nifty_total_market.csv",
     "Nifty Midcap 100": "data/nifty_midcap100.csv",
+    "Nifty Midcap 150": "data/nifty_midcap150.csv",
     "Nifty Smallcap 100": "data/nifty_smallcap100.csv",
     "Nifty Smallcap 250": "data/nifty_smallcap250.csv",
     "SME List": "data/sme_list.csv",
@@ -60,7 +68,10 @@ UNIVERSE_ID_BY_DISPLAY = {
     "Nifty 50": "NIFTY_50",
     "Nifty 100": "NIFTY_100",
     "Nifty 500": "NIFTY_500",
+    "Nifty 500 Healthcare": "NIFTY500_HEALTHCARE",
+    "Nifty Total Market": "NIFTY_TOTAL_MKT",
     "Nifty Midcap 100": "MIDCAP_100",
+    "Nifty Midcap 150": "MIDCAP_150",
     "Nifty Smallcap 100": "SMALLCAP_100",
     "Nifty Smallcap 250": "SMALLCAP_250",
     "SME List": "SME_LIST",
@@ -69,7 +80,20 @@ UNIVERSE_ID_BY_DISPLAY = {
     "All NSE Stocks": "ALL_NSE",
 }
 
-# CSV / DB membership validation (all 8 sidebar universes).
+# CSV / DB membership validation (all sidebar universes).
 CANONICAL_MEMBERSHIP_UNIVERSES = tuple(SYMBOL_GROUPS.keys())
 
 UNIVERSE_OPTIONS = list(SYMBOL_GROUPS.keys())
+
+# Main dashboard sector filter: Screener Browse sectors (see data/screener_market/sector_index.json).
+def _dashboard_sector_options():
+    try:
+        from utils.screener_market_csv import load_sector_index
+
+        labs = [s["label"] for s in load_sector_index()]
+        return ["(All)"] + labs
+    except Exception:
+        return ["(All)"]
+
+
+DASHBOARD_SECTOR_OPTIONS = _dashboard_sector_options()

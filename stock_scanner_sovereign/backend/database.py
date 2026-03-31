@@ -37,6 +37,7 @@ class DatabaseManager:
     _pool = None
     _brk_lvl_column_checked = False
     _mrs_prev_day_column_checked = False
+    _w_rsi2_column_checked = False
 
     def __init__(self):
         self.host, self.port = os.getenv('DB_HOST', 'localhost'), os.getenv('DB_PORT', '5432')
@@ -296,6 +297,84 @@ class DatabaseManager:
                     return {r[0]: float(r[1]) for r in cur.fetchall()}
         except Exception as e:
             logger.warning("Database: get_mrs_prev_day_map failed: %s", e)
+            return {}
+
+    def ensure_w_rsi2_column(self):
+        """Weekly RSI(2) on dashboard (master backfill from Parquet + LTP blend)."""
+        if DatabaseManager._w_rsi2_column_checked:
+            return
+        try:
+            self.ensure_live_state_table()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'live_state' AND column_name = 'w_rsi2'
+                        """
+                    )
+                    if cur.fetchone() is None:
+                        cur.execute("ALTER TABLE live_state ADD COLUMN w_rsi2 DOUBLE PRECISION")
+                        conn.commit()
+                        logger.info("Database: added live_state.w_rsi2")
+            DatabaseManager._w_rsi2_column_checked = True
+        except Exception as e:
+            logger.warning("Database: ensure_w_rsi2_column: %s", e)
+
+    def upsert_w_rsi2(self, rows):
+        """rows: list of (symbol, w_rsi2)."""
+        if not rows:
+            return
+        self.ensure_w_rsi2_column()
+        payload = sorted(((s, float(v)) for s, v in rows), key=lambda x: x[0])
+        for attempt in range(5):
+            try:
+                with self.get_connection() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            acquire_live_state_xact_lock(cur)
+                            execute_values(
+                                cur,
+                                """
+                                INSERT INTO live_state (symbol, w_rsi2) VALUES %s
+                                ON CONFLICT (symbol) DO UPDATE SET w_rsi2 = EXCLUDED.w_rsi2
+                                """,
+                                payload,
+                            )
+                        conn.commit()
+                        return
+                    except Exception:
+                        try:
+                            if conn is not None and getattr(conn, "closed", 1) == 0:
+                                conn.rollback()
+                        except Exception:
+                            pass
+                        raise
+            except Exception as e:
+                emsg = str(e).lower()
+                is_conn_drop = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)) or (
+                    "connection already closed" in emsg or "server closed the connection" in emsg
+                )
+                if (_is_deadlock_exception(e) or is_conn_drop) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                logger.error("Database: upsert_w_rsi2 failed: %s", e, exc_info=True)
+                return
+
+    def get_w_rsi2_map(self, symbols):
+        if not symbols:
+            return {}
+        self.ensure_w_rsi2_column()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT symbol, w_rsi2 FROM live_state WHERE symbol IN %s AND w_rsi2 IS NOT NULL",
+                        (tuple(symbols),),
+                    )
+                    return {r[0]: float(r[1]) for r in cur.fetchall()}
+        except Exception as e:
+            logger.warning("Database: get_w_rsi2_map failed: %s", e)
             return {}
 
     def snapshot_mrs_prev_day_from_current_mrs(self):

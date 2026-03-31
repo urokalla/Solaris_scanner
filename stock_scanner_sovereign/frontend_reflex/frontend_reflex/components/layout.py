@@ -11,9 +11,23 @@ def loading_marquee():
     )
 
 def sidebar():
+    # Keep universe + sector <select> **outside** the scroll region. A single overflow parent
+    # captures wheel events while the sector list is open → janky scrolling / jumpy menu.
     return rx.vstack(
-        terminal_header(), rx.vstack(universe_panel(), benchmark_panel(), spacing="0", width="100%", overflow_y="auto", flex="1"),
-        spacing="0", width="300px", height="100vh", border_right="1px solid #333333"
+        terminal_header(),
+        universe_panel(),
+        rx.box(
+            benchmark_panel(),
+            flex="1",
+            min_height="0",
+            width="100%",
+            overflow_y="auto",
+            overscroll_behavior="contain",
+        ),
+        spacing="0",
+        width="300px",
+        height="100vh",
+        border_right="1px solid #333333",
     )
 
 def main_content():

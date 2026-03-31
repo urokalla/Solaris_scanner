@@ -235,11 +235,13 @@ def initial_sync_helper(self):
                 with self.lock: [self.buffers[s].append(r) for r in d]; self.pending.add(s)
         except Exception as e: LGR.error(f"Sync {s}: {e}")
     _fetch(self.bench_sym)
-    with ThreadPoolExecutor(20) as ex: ex.map(_fetch, [s for s in self.symbols if s != self.bench_sym])
+    with ThreadPoolExecutor(settings.SIDECAR_SYNC_WORKERS) as ex:
+        ex.map(_fetch, [s for s in self.symbols if s != self.bench_sym])
 
 def main_loop_helper(self):
+    loop_sleep = max(0.05, float(settings.SIDECAR_LOOP_SLEEP_SEC))
     while self.is_scanning:
-        time.sleep(0.5)
+        time.sleep(loop_sleep)
         # Snapshot keys so update_universe() replacing buffers cannot KeyError mid-iteration.
         for s in list(self.all_s):
             buf = self.buffers.get(s)

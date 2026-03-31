@@ -1,0 +1,12 @@
+{
+  "symbol": "JINDALSAW",
+  "screener_url": "https://www.screener.in/company/JINDALSAW/consolidated/",
+  "latest_concall": {
+    "month_label": "Jan 2026",
+    "transcript_url": "https://www.bseindia.com/xml-data/corpfiling/AttachHis/ac07b2e7-414b-41db-a1e7-13ee6035ead5.pdf",
+    "ppt_url": "https://www.bseindia.com/xml-data/corpfiling/AttachHis/76bbce5d-d0a9-4fab-8a39-7542133a1b7f.pdf",
+    "rec_url": "https://www.jindalsaw.com/audio/Jindal%20SawQ3%20FY26%20Audio%20Recording.mp3",
+    "ai_summary_path": "/concalls/summary/23069032/"
+  },
+  "downloaded_transcript_path": "/home/udai/RS_PROJECT/data/concall_transcripts/JINDALSAW_Jan_2026_transcript.pdf"
+}

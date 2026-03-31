@@ -31,6 +31,11 @@ class Settings:
     BREAKOUT_PIVOT_HIGH_WINDOW = int(os.getenv("BREAKOUT_PIVOT_HIGH_WINDOW", "20"))
     BREAKOUT_MIN_INTRADAY_BARS = int(os.getenv("BREAKOUT_MIN_INTRADAY_BARS", "100"))
 
+    # Sidecar CPU: main breakout loop sleeps this long between full universe passes (default 0.5s was heavy on laptops).
+    SIDECAR_LOOP_SLEEP_SEC = float(os.getenv("SIDECAR_LOOP_SLEEP_SEC", "0.5"))
+    # Parallel symbol history fetch on sidecar startup (was hard-coded 20).
+    SIDECAR_SYNC_WORKERS = max(1, min(32, int(os.getenv("SIDECAR_SYNC_WORKERS", "8"))))
+
     # Pine-style daily strategy (sidecar): EMA9/21 + Donchian + ATR trail (see utils/pine_udai_long.py)
     SIDECAR_UDAI_PINE = os.getenv("SIDECAR_UDAI_PINE", "").strip().lower() in ("1", "true", "yes")
     UDAI_EMA_FAST = int(os.getenv("UDAI_EMA_FAST", "9"))
@@ -41,6 +46,15 @@ class Settings:
     UDAI_RISK_PCT = float(os.getenv("UDAI_RISK_PCT", "1.0"))
     UDAI_ACCOUNT_EQUITY = float(os.getenv("UDAI_ACCOUNT_EQUITY", "1000000"))
     UDAI_REFRESH_SEC = float(os.getenv("UDAI_REFRESH_SEC", "60"))
+
+    # Main Reflex dashboard: how often to pull get_ui_view (higher = lower CPU, slower UI refresh).
+    DASHBOARD_POLL_INTERVAL_SEC = float(os.getenv("DASHBOARD_POLL_INTERVAL_SEC", "2.5"))
+
+    # Main dashboard: weekly Wilder RSI(2) on Friday-week closes (IST); Parquet + optional LTP blend.
+    DASHBOARD_W_RSI2 = os.getenv("DASHBOARD_W_RSI2", "1").strip().lower() in ("1", "true", "yes")
+    DASHBOARD_W_RSI2_REFRESH_SEC = float(os.getenv("DASHBOARD_W_RSI2_REFRESH_SEC", "180"))
+    DASHBOARD_W_RSI2_LIVE_IST_HOUR = int(os.getenv("DASHBOARD_W_RSI2_LIVE_IST_HOUR", "14"))
+    DASHBOARD_W_RSI2_LIVE_IST_MINUTE = int(os.getenv("DASHBOARD_W_RSI2_LIVE_IST_MINUTE", "45"))
 
     # Monthly Wilder RSI(2) on month-end closes: sidecar column blends live LTP into “today” from this IST time (weekdays only).
     SIDECAR_M_RSI2 = os.getenv("SIDECAR_M_RSI2", "1").strip().lower() in ("1", "true", "yes")

@@ -36,12 +36,15 @@ def seed_universes(db):
         ("BANK_NIFTY", "BANK NIFTY"),
         ("NIFTY_100", "NIFTY 100"), # Added
         ("MIDCAP_100", "MIDCAP 100"),
+        ("MIDCAP_150", "MIDCAP 150"),
         ("SMALLCAP_100", "SMALLCAP 100"),
         ("SMALLCAP_250", "SMALLCAP 250"),
         ("SME_LIST", "SME LIST"),
         ("MIDCAP_250", "MIDCAP 250"),
         ("MICROCAP_250", "MICROCAP_250"),
         ("NIFTY_500", "NIFTY 500"),
+        ("NIFTY500_HEALTHCARE", "Nifty 500 Healthcare"),
+        ("NIFTY_TOTAL_MKT", "Nifty Total Market"),
         ("ALL_NSE", "All NSE Listed Stocks")
     ]
     with db.Session() as session:
@@ -182,11 +185,14 @@ def main():
         ("nifty50.csv", "NIFTY_50"),
         ("nifty100.csv", "NIFTY_100"),
         ("nifty_midcap100.csv", "MIDCAP_100"),
+        ("nifty_midcap150.csv", "MIDCAP_150"),
         ("nifty_smallcap100.csv", "SMALLCAP_100"),
         ("nifty_smallcap250.csv", "SMALLCAP_250"),
         ("sme_list.csv", "SME_LIST"),
         ("microcap250.csv", "MICROCAP_250"),
-        ("nifty500.csv", "NIFTY_500")
+        ("nifty500.csv", "NIFTY_500"),
+        ("nifty500_healthcare.csv", "NIFTY500_HEALTHCARE"),
+        ("nifty_total_market.csv", "NIFTY_TOTAL_MKT"),
     ]
     
     for csv_file, u_id in mappings:

@@ -1,0 +1,758 @@
+symbol_nse,company_name,industry,isin,source_csv
+NSE:360ONE-EQ,360 ONE WAM Ltd.,Financial Services,INE466L01038,nifty500.csv
+NSE:3MINDIA-EQ,3M India Ltd.,Diversified,INE470A01017,nifty500.csv
+NSE:AADHARHFC-EQ,Aadhar Housing Finance Ltd.,Financial Services,INE883F01010,nifty500.csv
+NSE:AARTIDRUGS-EQ,Aarti Drugs Ltd.,Healthcare,INE767A01016,nifty_total_market.csv
+NSE:AARTIIND-EQ,Aarti Industries Ltd.,Chemicals,INE769A01020,nifty500.csv
+NSE:AARTIPHARM-EQ,Aarti Pharmalabs Ltd.,Healthcare,INE0LRU01027,nifty_total_market.csv
+NSE:AAVAS-EQ,Aavas Financiers Ltd.,Financial Services,INE216P01012,nifty500.csv
+NSE:ABB-EQ,ABB India Ltd.,Capital Goods,INE117A01022,nifty500.csv
+NSE:ABBOTINDIA-EQ,Abbott India Ltd.,Healthcare,INE358A01014,nifty500.csv
+NSE:ABCAPITAL-EQ,Aditya Birla Capital Ltd.,Financial Services,INE674K01013,nifty500.csv
+NSE:ABDL-EQ,Allied Blenders and Distillers Ltd.,Fast Moving Consumer Goods,INE552Z01027,nifty_total_market.csv
+NSE:ABFRL-EQ,Aditya Birla Fashion and Retail Ltd.,Consumer Services,INE647O01011,nifty500.csv
+NSE:ABLBL-EQ,Aditya Birla Lifestyle Brands Ltd.,Consumer Services,INE14LE01019,nifty500.csv
+NSE:ABREL-EQ,Aditya Birla Real Estate Ltd.,Forest Materials,INE055A01016,nifty500.csv
+NSE:ABSLAMC-EQ,Aditya Birla Sun Life AMC Ltd.,Financial Services,INE404A01024,nifty500.csv
+NSE:ACC-EQ,ACC Ltd.,Construction Materials,INE012A01025,nifty500.csv
+NSE:ACE-EQ,Action Construction Equipment Ltd.,Capital Goods,INE731H01025,nifty500.csv
+NSE:ACI-EQ,Archean Chemical Industries Ltd.,Chemicals,INE128X01021,nifty_total_market.csv
+NSE:ACMESOLAR-EQ,ACME Solar Holdings Ltd.,Power,INE622W01025,nifty500.csv
+NSE:ACUTAAS-EQ,Acutaas Chemicals Ltd.,Healthcare,INE00FF01025,nifty_total_market.csv
+NSE:ADANIENSOL-EQ,Adani Energy Solutions Ltd.,Power,INE931S01010,nifty500.csv
+NSE:ADANIENT-EQ,Adani Enterprises Ltd.,Metals & Mining,INE423A01024,nifty500.csv
+NSE:ADANIGREEN-EQ,Adani Green Energy Ltd.,Power,INE364U01010,nifty500.csv
+NSE:ADANIPORTS-EQ,Adani Ports and Special Economic Zone Ltd.,Services,INE742F01042,nifty500.csv
+NSE:ADANIPOWER-EQ,Adani Power Ltd.,Power,INE814H01029,nifty500.csv
+NSE:ADVENZYMES-EQ,Advanced Enzyme Tech Ltd.,Healthcare,INE837H01020,nifty_total_market.csv
+NSE:AEGISLOG-EQ,Aegis Logistics Ltd.,Oil Gas & Consumable Fuels,INE208C01025,nifty500.csv
+NSE:AEGISVOPAK-EQ,Aegis Vopak Terminals Ltd.,Oil Gas & Consumable Fuels,INE0INX01018,nifty500.csv
+NSE:AEQUS-EQ,Aequs Ltd.,Capital Goods,INE947N01017,nifty_total_market.csv
+NSE:AETHER-EQ,Aether Industries Ltd.,Chemicals,INE0BWX01014,nifty_total_market.csv
+NSE:AFCONS-EQ,Afcons Infrastructure Ltd.,Construction,INE101I01011,nifty500.csv
+NSE:AFFLE-EQ,Affle 3i Ltd.,Information Technology,INE00WC01027,nifty500.csv
+NSE:AGARWALEYE-EQ,Dr. Agarwal's Health Care Ltd.,Healthcare,INE943P01029,nifty500.csv
+NSE:AHLUCONT-EQ,Ahluwalia Contracts (India) Ltd.,Construction,INE758C01029,nifty_total_market.csv
+NSE:AIAENG-EQ,AIA Engineering Ltd.,Capital Goods,INE212H01026,nifty500.csv
+NSE:AIIL-EQ,Authum Investment & Infrastructure Ltd.,Financial Services,INE206F01022,nifty500.csv
+NSE:AJANTPHARM-EQ,Ajanta Pharmaceuticals Ltd.,Healthcare,INE031B01049,nifty500.csv
+NSE:AKUMS-EQ,Akums Drugs and Pharmaceuticals Ltd.,Healthcare,INE09XN01023,nifty500.csv
+NSE:AKZOINDIA-EQ,Akzo Nobel India Ltd.,Consumer Durables,INE133A01011,nifty500.csv
+NSE:ALIVUS-EQ,Alivus Life Sciences Ltd.,Healthcare,INE03Q201024,nifty_total_market.csv
+NSE:ALKEM-EQ,Alkem Laboratories Ltd.,Healthcare,INE540L01014,nifty500.csv
+NSE:ALKYLAMINE-EQ,Alkyl Amines Chemicals Ltd.,Chemicals,INE150B01039,nifty500.csv
+NSE:ALOKINDS-EQ,Alok Industries Ltd.,Textiles,INE270A01029,nifty500.csv
+NSE:AMBER-EQ,Amber Enterprises India Ltd.,Consumer Durables,INE371P01015,nifty500.csv
+NSE:AMBUJACEM-EQ,Ambuja Cements Ltd.,Construction Materials,INE079A01024,nifty500.csv
+NSE:ANANDRATHI-EQ,Anand Rathi Wealth Ltd.,Financial Services,INE463V01026,nifty500.csv
+NSE:ANANTRAJ-EQ,Anant Raj Ltd.,Realty,INE242C01024,nifty500.csv
+NSE:ANGELONE-EQ,Angel One Ltd.,Financial Services,INE732I01021,nifty500.csv
+NSE:ANTHEM-EQ,Anthem Biosciences Ltd.,Healthcare,INE0CZ201020,nifty_total_market.csv
+NSE:ANUP-EQ,The Anup Engineering Ltd.,Capital Goods,INE294Z01018,nifty_total_market.csv
+NSE:ANURAS-EQ,Anupam Rasayan India Ltd.,Chemicals,INE930P01018,nifty_total_market.csv
+NSE:APARINDS-EQ,Apar Industries Ltd.,Capital Goods,INE372A01015,nifty500.csv
+NSE:APLAPOLLO-EQ,APL Apollo Tubes Ltd.,Capital Goods,INE702C01027,nifty500.csv
+NSE:APLLTD-EQ,Alembic Pharmaceuticals Ltd.,Healthcare,INE901L01018,nifty500.csv
+NSE:APOLLO-EQ,Apollo Micro Systems Ltd.,Capital Goods,INE713T01028,nifty_total_market.csv
+NSE:APOLLOHOSP-EQ,Apollo Hospitals Enterprise Ltd.,Healthcare,INE437A01024,nifty500.csv
+NSE:APOLLOTYRE-EQ,Apollo Tyres Ltd.,Automobile and Auto Components,INE438A01022,nifty500.csv
+NSE:APTUS-EQ,Aptus Value Housing Finance India Ltd.,Financial Services,INE852O01025,nifty500.csv
+NSE:ARE&M-EQ,Amara Raja Energy & Mobility Ltd.,Automobile and Auto Components,INE885A01032,nifty500.csv
+NSE:ARVIND-EQ,Arvind Ltd.,Textiles,INE034A01011,nifty_total_market.csv
+NSE:ARVINDFASN-EQ,Arvind Fashions Ltd.,Consumer Services,INE955V01021,nifty_total_market.csv
+NSE:ASAHIINDIA-EQ,Asahi India Glass Ltd.,Automobile and Auto Components,INE439A01020,nifty500.csv
+NSE:ASHAPURMIN-EQ,Ashapura Minechem Ltd.,Metals & Mining,INE348A01023,nifty_total_market.csv
+NSE:ASHOKA-EQ,Ashoka Buildcon Ltd.,Construction,INE442H01029,nifty_total_market.csv
+NSE:ASHOKLEY-EQ,Ashok Leyland Ltd.,Capital Goods,INE208A01029,nifty500.csv
+NSE:ASIANPAINT-EQ,Asian Paints Ltd.,Consumer Durables,INE021A01026,nifty500.csv
+NSE:ASKAUTOLTD-EQ,ASK Automotive Ltd.,Automobile and Auto Components,INE491J01022,nifty_total_market.csv
+NSE:ASTERDM-EQ,Aster DM Healthcare Ltd.,Healthcare,INE914M01019,nifty500.csv
+NSE:ASTRAL-EQ,Astral Ltd.,Capital Goods,INE006I01046,nifty500.csv
+NSE:ASTRAMICRO-EQ,Astra Microwave Products Ltd.,Capital Goods,INE386C01029,nifty_total_market.csv
+NSE:ASTRAZEN-EQ,AstraZenca Pharma India Ltd.,Healthcare,INE203A01020,nifty500.csv
+NSE:ATGL-EQ,Adani Total Gas Ltd.,Oil Gas & Consumable Fuels,INE399L01023,nifty500.csv
+NSE:ATHERENERG-EQ,Ather Energy Ltd.,Automobile and Auto Components,INE0LEZ01016,nifty500.csv
+NSE:ATLANTAELE-EQ,Atlanta Electricals Ltd.,Capital Goods,INE0Z4F01028,nifty_total_market.csv
+NSE:ATUL-EQ,Atul Ltd.,Chemicals,INE100A01010,nifty500.csv
+NSE:AUBANK-EQ,AU Small Finance Bank Ltd.,Financial Services,INE949L01017,nifty500.csv
+NSE:AURIONPRO-EQ,Aurionpro Solution Ltd.,Information Technology,INE132H01018,nifty_total_market.csv
+NSE:AUROPHARMA-EQ,Aurobindo Pharma Ltd.,Healthcare,INE406A01037,nifty500.csv
+NSE:AVALON-EQ,Avalon Technologies Ltd.,Capital Goods,INE0LCL01028,nifty_total_market.csv
+NSE:AVANTIFEED-EQ,Avanti Feeds Ltd.,Fast Moving Consumer Goods,INE871C01038,nifty_total_market.csv
+NSE:AVL-EQ,Aditya Vision Ltd.,Consumer Services,INE679V01027,nifty_total_market.csv
+NSE:AWFIS-EQ,Awfis Space Solutions Ltd.,Services,INE108V01019,nifty_total_market.csv
+NSE:AWL-EQ,AWL Agri Business Ltd.,Fast Moving Consumer Goods,INE699H01024,nifty500.csv
+NSE:AXISBANK-EQ,Axis Bank Ltd.,Financial Services,INE238A01034,nifty500.csv
+NSE:AXISCADES-EQ,AXISCADES Technologies Ltd.,Capital Goods,INE555B01013,nifty_total_market.csv
+NSE:AZAD-EQ,Azad Engineering Ltd.,Capital Goods,INE02IJ01035,nifty_total_market.csv
+NSE:BAJAJ-AUTO-EQ,Bajaj Auto Ltd.,Automobile and Auto Components,INE917I01010,nifty_total_market.csv
+NSE:BAJAJELEC-EQ,Bajaj Electricals Ltd,Consumer Durables,INE193E01025,nifty_total_market.csv
+NSE:BAJAJFINSV-EQ,Bajaj Finserv Ltd.,Financial Services,INE918I01026,nifty500.csv
+NSE:BAJAJHFL-EQ,Bajaj Housing Finance Ltd.,Financial Services,INE377Y01014,nifty500.csv
+NSE:BAJAJHLDNG-EQ,Bajaj Holdings & Investment Ltd.,Financial Services,INE118A01012,nifty500.csv
+NSE:BAJFINANCE-EQ,Bajaj Finance Ltd.,Financial Services,INE296A01032,nifty500.csv
+NSE:BALAMINES-EQ,Balaji Amines Ltd.,Chemicals,INE050E01027,nifty_total_market.csv
+NSE:BALKRISIND-EQ,Balkrishna Industries Ltd.,Automobile and Auto Components,INE787D01026,nifty500.csv
+NSE:BALRAMCHIN-EQ,Balrampur Chini Mills Ltd.,Fast Moving Consumer Goods,INE119A01028,nifty500.csv
+NSE:BALUFORGE-EQ,Balu Forge Industries Ltd.,Capital Goods,INE011E01029,nifty_total_market.csv
+NSE:BANCOINDIA-EQ,Banco Products (India) Ltd.,Automobile and Auto Components,INE213C01025,nifty_total_market.csv
+NSE:BANDHANBNK-EQ,Bandhan Bank Ltd.,Financial Services,INE545U01014,nifty500.csv
+NSE:BANKBARODA-EQ,Bank of Baroda,Financial Services,INE028A01039,nifty500.csv
+NSE:BANKINDIA-EQ,Bank of India,Financial Services,INE084A01016,nifty500.csv
+NSE:BASF-EQ,BASF India Ltd.,Chemicals,INE373A01013,nifty500.csv
+NSE:BATAINDIA-EQ,Bata India Ltd.,Consumer Durables,INE176A01028,nifty500.csv
+NSE:BAYERCROP-EQ,Bayer Cropscience Ltd.,Chemicals,INE462A01022,nifty500.csv
+NSE:BBOX-EQ,Black Box Ltd.,Information Technology,INE676A01027,nifty_total_market.csv
+NSE:BBTC-EQ,Bombay Burmah Trading Corporation Ltd.,Fast Moving Consumer Goods,INE050A01025,nifty500.csv
+NSE:BDL-EQ,Bharat Dynamics Ltd.,Capital Goods,INE171Z01026,nifty500.csv
+NSE:BECTORFOOD-EQ,Mrs. Bectors Food Specialities Ltd.,Fast Moving Consumer Goods,INE495P01020,nifty_total_market.csv
+NSE:BEL-EQ,Bharat Electronics Ltd.,Capital Goods,INE263A01024,nifty500.csv
+NSE:BELRISE-EQ,Belrise Industries Ltd.,Automobile and Auto Components,INE894V01022,nifty_total_market.csv
+NSE:BEML-EQ,BEML Ltd.,Capital Goods,INE258A01024,nifty500.csv
+NSE:BERGEPAINT-EQ,Berger Paints India Ltd.,Consumer Durables,INE463A01038,nifty500.csv
+NSE:BHARATFORG-EQ,Bharat Forge Ltd.,Automobile and Auto Components,INE465A01025,nifty500.csv
+NSE:BHARTIARTL-EQ,Bharti Airtel Ltd.,Telecommunication,INE397D01024,nifty500.csv
+NSE:BHARTIHEXA-EQ,Bharti Hexacom Ltd.,Telecommunication,INE343G01021,nifty500.csv
+NSE:BHEL-EQ,Bharat Heavy Electricals Ltd.,Capital Goods,INE257A01026,nifty500.csv
+NSE:BIKAJI-EQ,Bikaji Foods International Ltd.,Fast Moving Consumer Goods,INE00E101023,nifty500.csv
+NSE:BIOCON-EQ,Biocon Ltd.,Healthcare,INE376G01013,nifty500.csv
+NSE:BIRLACORPN-EQ,Birla Corporation Ltd.,Construction Materials,INE340A01012,nifty_total_market.csv
+NSE:BLACKBUCK-EQ,Blackbuck Ltd.,Services,INE0UIZ01018,nifty_total_market.csv
+NSE:BLS-EQ,BLS International Services Ltd.,Consumer Services,INE153T01027,nifty500.csv
+NSE:BLUEDART-EQ,Blue Dart Express Ltd.,Services,INE233B01017,nifty500.csv
+NSE:BLUEJET-EQ,Blue Jet Healthcare Ltd.,Healthcare,INE0KBH01020,nifty500.csv
+NSE:BLUESTARCO-EQ,Blue Star Ltd.,Consumer Durables,INE472A01039,nifty500.csv
+NSE:BLUESTONE-EQ,BlueStone Jewellery and Lifestyle Ltd.,Consumer Durables,INE304W01038,nifty_total_market.csv
+NSE:BORORENEW-EQ,Borosil Renewables Ltd.,Capital Goods,INE666D01022,nifty_total_market.csv
+NSE:BOSCHLTD-EQ,Bosch Ltd.,Automobile and Auto Components,INE323A01026,nifty500.csv
+NSE:BPCL-EQ,Bharat Petroleum Corporation Ltd.,Oil Gas & Consumable Fuels,INE029A01011,nifty500.csv
+NSE:BRIGADE-EQ,Brigade Enterprises Ltd.,Realty,INE791I01019,nifty500.csv
+NSE:BRITANNIA-EQ,Britannia Industries Ltd.,Fast Moving Consumer Goods,INE216A01030,nifty500.csv
+NSE:BSE-EQ,BSE Ltd.,Financial Services,INE118H01025,nifty500.csv
+NSE:BSOFT-EQ,Birlasoft Ltd.,Information Technology,INE836A01035,nifty500.csv
+NSE:CAMPUS-EQ,Campus Activewear Ltd.,Consumer Durables,INE278Y01022,nifty500.csv
+NSE:CAMS-EQ,Computer Age Management Services Ltd.,Financial Services,INE596I01020,nifty500.csv
+NSE:CANBK-EQ,Canara Bank,Financial Services,INE476A01022,nifty500.csv
+NSE:CANFINHOME-EQ,Can Fin Homes Ltd.,Financial Services,INE477A01020,nifty500.csv
+NSE:CANHLIFE-EQ,Canara HSBC Life Insurance Company Ltd.,Financial Services,INE01TY01017,nifty_total_market.csv
+NSE:CAPILLARY-EQ,Capillary Technologies India Ltd.,Information Technology,INE0ILV01024,nifty_total_market.csv
+NSE:CAPLIPOINT-EQ,Caplin Point Laboratories Ltd.,Healthcare,INE475E01026,nifty500.csv
+NSE:CARBORUNIV-EQ,Carborundum Universal Ltd.,Capital Goods,INE120A01034,nifty500.csv
+NSE:CARTRADE-EQ,Cartrade Tech Ltd.,Consumer Services,INE290S01011,nifty_total_market.csv
+NSE:CASTROLIND-EQ,Castrol India Ltd.,Oil Gas & Consumable Fuels,INE172A01027,nifty500.csv
+NSE:CCAVENUE-EQ,AvenuesAI Ltd.,Financial Services,INE483S01020,nifty_total_market.csv
+NSE:CCL-EQ,CCL Products (I) Ltd.,Fast Moving Consumer Goods,INE421D01022,nifty500.csv
+NSE:CDSL-EQ,Central Depository Services (India) Ltd.,Financial Services,INE736A01011,nifty500.csv
+NSE:CEATLTD-EQ,Ceat Ltd.,Automobile and Auto Components,INE482A01020,nifty500.csv
+NSE:CELLO-EQ,Cello World Ltd.,Consumer Durables,INE0LMW01024,nifty_total_market.csv
+NSE:CEMPRO-EQ,Cemindia Projects Ltd.,Construction,INE686A01026,nifty_total_market.csv
+NSE:CENTRALBK-EQ,Central Bank of India,Financial Services,INE483A01010,nifty500.csv
+NSE:CENTURYPLY-EQ,Century Plyboards (India) Ltd.,Consumer Durables,INE348B01021,nifty500.csv
+NSE:CERA-EQ,Cera Sanitaryware Ltd,Consumer Durables,INE739E01017,nifty500.csv
+NSE:CESC-EQ,CESC Ltd.,Power,INE486A01021,nifty500.csv
+NSE:CGCL-EQ,Capri Global Capital Ltd.,Financial Services,INE180C01042,nifty500.csv
+NSE:CGPOWER-EQ,CG Power and Industrial Solutions Ltd.,Capital Goods,INE067A01029,nifty500.csv
+NSE:CHALET-EQ,Chalet Hotels Ltd.,Consumer Services,INE427F01016,nifty500.csv
+NSE:CHAMBLFERT-EQ,Chambal Fertilizers & Chemicals Ltd.,Chemicals,INE085A01013,nifty500.csv
+NSE:CHENNPETRO-EQ,Chennai Petroleum Corporation Ltd.,Oil Gas & Consumable Fuels,INE178A01016,nifty500.csv
+NSE:CHOICEIN-EQ,Choice International Ltd.,Financial Services,INE102B01014,nifty500.csv
+NSE:CHOLAFIN-EQ,Cholamandalam Investment and Finance Company Ltd.,Financial Services,INE121A01024,nifty500.csv
+NSE:CHOLAHLDNG-EQ,Cholamandalam Financial Holdings Ltd.,Financial Services,INE149A01033,nifty500.csv
+NSE:CIEINDIA-EQ,CIE Automotive India Ltd.,Automobile and Auto Components,INE536H01010,nifty_total_market.csv
+NSE:CIGNITITEC-EQ,Cigniti Technologies Ltd.,Information Technology,INE675C01017,nifty_total_market.csv
+NSE:CIPLA-EQ,Cipla Ltd.,Healthcare,INE059A01026,nifty500.csv
+NSE:CLEAN-EQ,Clean Science and Technology Ltd.,Chemicals,INE227W01023,nifty500.csv
+NSE:CMSINFO-EQ,CMS Info Systems Ltd.,Services,INE925R01014,nifty_total_market.csv
+NSE:COALINDIA-EQ,Coal India Ltd.,Oil Gas & Consumable Fuels,INE522F01014,nifty500.csv
+NSE:COCHINSHIP-EQ,Cochin Shipyard Ltd.,Capital Goods,INE704P01025,nifty500.csv
+NSE:COFORGE-EQ,Coforge Ltd.,Information Technology,INE591G01025,nifty500.csv
+NSE:COHANCE-EQ,Cohance Lifesciences Ltd.,Healthcare,INE03QK01018,nifty500.csv
+NSE:COLPAL-EQ,Colgate Palmolive (India) Ltd.,Fast Moving Consumer Goods,INE259A01022,nifty500.csv
+NSE:CONCOR-EQ,Container Corporation of India Ltd.,Services,INE111A01025,nifty500.csv
+NSE:CONCORDBIO-EQ,Concord Biotech Ltd.,Healthcare,INE338H01029,nifty500.csv
+NSE:COROMANDEL-EQ,Coromandel International Ltd.,Chemicals,INE169A01031,nifty500.csv
+NSE:CORONA-EQ,CORONA Remedies Ltd.,Healthcare,INE02ZQ01018,nifty_total_market.csv
+NSE:CPPLUS-EQ,Aditya Infotech Ltd.,Capital Goods,INE819V01029,nifty_total_market.csv
+NSE:CRAFTSMAN-EQ,Craftsman Automation Ltd.,Automobile and Auto Components,INE00LO01017,nifty500.csv
+NSE:CRAMC-EQ,Canara Robeco Asset Management Company Ltd.,Financial Services,INE218I01013,nifty_total_market.csv
+NSE:CREDITACC-EQ,CreditAccess Grameen Ltd.,Financial Services,INE741K01010,nifty500.csv
+NSE:CRISIL-EQ,CRISIL Ltd.,Financial Services,INE007A01025,nifty500.csv
+NSE:CRIZAC-EQ,Crizac Ltd.,Consumer Services,INE0S4R01014,nifty_total_market.csv
+NSE:CROMPTON-EQ,Crompton Greaves Consumer Electricals Ltd.,Consumer Durables,INE299U01018,nifty500.csv
+NSE:CSBBANK-EQ,CSB Bank Ltd.,Financial Services,INE679A01013,nifty_total_market.csv
+NSE:CUB-EQ,City Union Bank Ltd.,Financial Services,INE491A01021,nifty500.csv
+NSE:CUMMINSIND-EQ,Cummins India Ltd.,Capital Goods,INE298A01020,nifty500.csv
+NSE:CUPID-EQ,Cupid Ltd.,Fast Moving Consumer Goods,INE509F01029,nifty_total_market.csv
+NSE:CYIENT-EQ,Cyient Ltd.,Information Technology,INE136B01020,nifty500.csv
+NSE:DABUR-EQ,Dabur India Ltd.,Fast Moving Consumer Goods,INE016A01026,nifty500.csv
+NSE:DALBHARAT-EQ,Dalmia Bharat Ltd.,Construction Materials,INE00R701025,nifty500.csv
+NSE:DATAMATICS-EQ,Datamatics Global Services Ltd.,Information Technology,INE365B01017,nifty_total_market.csv
+NSE:DATAPATTNS-EQ,Data Patterns (India) Ltd.,Capital Goods,INE0IX101010,nifty500.csv
+NSE:DBL-EQ,Dilip Buildcon Ltd.,Construction,INE917M01012,nifty_total_market.csv
+NSE:DBREALTY-EQ,Valor Estate Ltd.,Consumer Services,INE879I01012,nifty500.csv
+NSE:DCBBANK-EQ,DCB Bank Ltd.,Financial Services,INE503A01015,nifty_total_market.csv
+NSE:DCMSHRIRAM-EQ,DCM Shriram Ltd.,Diversified,INE499A01024,nifty500.csv
+NSE:DEEPAKFERT-EQ,Deepak Fertilisers & Petrochemicals Corp. Ltd.,Chemicals,INE501A01019,nifty500.csv
+NSE:DEEPAKNTR-EQ,Deepak Nitrite Ltd.,Chemicals,INE288B01029,nifty500.csv
+NSE:DELHIVERY-EQ,Delhivery Ltd.,Services,INE148O01028,nifty500.csv
+NSE:DEVYANI-EQ,Devyani International Ltd.,Consumer Services,INE872J01023,nifty500.csv
+NSE:DIACABS-EQ,Diamond Power Infrastructure Ltd.,Capital Goods,INE989C01038,nifty_total_market.csv
+NSE:DIVISLAB-EQ,Divi's Laboratories Ltd.,Healthcare,INE361B01024,nifty500.csv
+NSE:DIXON-EQ,Dixon Technologies (India) Ltd.,Consumer Durables,INE935N01020,nifty500.csv
+NSE:DLF-EQ,DLF Ltd.,Realty,INE271C01023,nifty500.csv
+NSE:DMART-EQ,Avenue Supermarts Ltd.,Consumer Services,INE192R01011,nifty500.csv
+NSE:DOMS-EQ,DOMS Industries Ltd.,Fast Moving Consumer Goods,INE321T01012,nifty500.csv
+NSE:DRREDDY-EQ,Dr. Reddy's Laboratories Ltd.,Healthcare,INE089A01031,nifty500.csv
+NSE:DUMMYALCAR-EQ,Dummy Allcargo Logistics Ltd.,Services,DUM418H01029,nifty_total_market.csv
+NSE:DYNAMATECH-EQ,Dynamatic Technologies Ltd.,Capital Goods,INE221B01012,nifty_total_market.csv
+NSE:ECLERX-EQ,eClerx Services Ltd.,Services,INE738I01010,nifty500.csv
+NSE:EDELWEISS-EQ,Edelweiss Financial Services Ltd.,Financial Services,INE532F01054,nifty_total_market.csv
+NSE:EICHERMOT-EQ,Eicher Motors Ltd.,Automobile and Auto Components,INE066A01021,nifty500.csv
+NSE:EIDPARRY-EQ,E.I.D. Parry (India) Ltd.,Fast Moving Consumer Goods,INE126A01031,nifty500.csv
+NSE:EIEL-EQ,Enviro Infra Engineers Ltd.,Utilities,INE0LLY01014,nifty_total_market.csv
+NSE:EIHOTEL-EQ,EIH Ltd.,Consumer Services,INE230A01023,nifty500.csv
+NSE:ELECON-EQ,Elecon Engineering Co. Ltd.,Capital Goods,INE205B01031,nifty500.csv
+NSE:ELECTCAST-EQ,Electrosteel Castings Ltd.,Capital Goods,INE086A01029,nifty_total_market.csv
+NSE:ELGIEQUIP-EQ,Elgi Equipments Ltd.,Capital Goods,INE285A01027,nifty500.csv
+NSE:ELLEN-EQ,Ellenbarrie Industrial Gases Ltd.,Chemicals,INE236E01022,nifty_total_market.csv
+NSE:EMAMILTD-EQ,Emami Ltd.,Fast Moving Consumer Goods,INE548C01032,nifty500.csv
+NSE:EMBDL-BE,Embassy Developments Ltd.,Realty,INE069I01010,nifty_total_market.csv
+NSE:EMCURE-EQ,Emcure Pharmaceuticals Ltd.,Healthcare,INE168P01015,nifty500.csv
+NSE:EMIL-EQ,Electronics Mart India Ltd.,Consumer Services,INE02YR01019,nifty_total_market.csv
+NSE:EMMVEE-EQ,Emmvee Photovoltaic Power Ltd.,Capital Goods,INE1C6T01020,nifty_total_market.csv
+NSE:ENDURANCE-EQ,Endurance Technologies Ltd.,Automobile and Auto Components,INE913H01037,nifty500.csv
+NSE:ENGINERSIN-EQ,Engineers India Ltd.,Construction,INE510A01028,nifty500.csv
+NSE:ENRIN-EQ,Siemens Energy India Ltd.,Capital Goods,INE1NPP01017,nifty500.csv
+NSE:ENTERO-EQ,Entero Healthcare Solutions Ltd.,Consumer Services,INE010601016,nifty_total_market.csv
+NSE:EPL-EQ,EPL Ltd.,Capital Goods,INE255A01020,nifty_total_market.csv
+NSE:EQUITASBNK-EQ,Equitas Small Finance Bank Ltd.,Financial Services,INE063P01018,nifty_total_market.csv
+NSE:ERIS-EQ,Eris Lifesciences Ltd.,Healthcare,INE406M01024,nifty500.csv
+NSE:ESCORTS-EQ,Escorts Kubota Ltd.,Capital Goods,INE042A01014,nifty500.csv
+NSE:ETERNAL-EQ,Eternal Ltd.,Consumer Services,INE758T01015,nifty500.csv
+NSE:ETHOSLTD-EQ,Ethos Ltd.,Consumer Durables,INE04TZ01018,nifty_total_market.csv
+NSE:EUREKAFORB-EQ,Eureka Forbes Ltd.,Consumer Durables,INE0KCE01017,nifty_total_market.csv
+NSE:EXIDEIND-EQ,Exide Industries Ltd.,Automobile and Auto Components,INE302A01020,nifty500.csv
+NSE:FACT-EQ,Fertilisers and Chemicals Travancore Ltd.,Chemicals,INE188A01015,nifty500.csv
+NSE:FEDERALBNK-EQ,Federal Bank Ltd.,Financial Services,INE171A01029,nifty500.csv
+NSE:FEDFINA-EQ,Fedbank Financial Services Ltd.,Financial Services,INE007N01010,nifty_total_market.csv
+NSE:FIEMIND-EQ,Fiem Industries Ltd,Automobile and Auto Components,INE737H01014,nifty_total_market.csv
+NSE:FINCABLES-EQ,Finolex Cables Ltd.,Capital Goods,INE235A01022,nifty500.csv
+NSE:FINPIPE-EQ,Finolex Industries Ltd.,Capital Goods,INE183A01024,nifty500.csv
+NSE:FIRSTCRY-EQ,Brainbees Solutions Ltd.,Consumer Services,INE02RE01045,nifty500.csv
+NSE:FIVESTAR-EQ,Five-Star Business Finance Ltd.,Financial Services,INE128S01021,nifty500.csv
+NSE:FLUOROCHEM-EQ,Gujarat Fluorochemicals Ltd.,Chemicals,INE09N301011,nifty500.csv
+NSE:FORCEMOT-EQ,Force Motors Ltd.,Automobile and Auto Components,INE451A01017,nifty500.csv
+NSE:FORTIS-EQ,Fortis Healthcare Ltd.,Healthcare,INE061F01013,nifty500.csv
+NSE:FSL-EQ,Firstsource Solutions Ltd.,Services,INE684F01012,nifty500.csv
+NSE:GABRIEL-EQ,Gabriel India Ltd.,Automobile and Auto Components,INE524A01029,nifty_total_market.csv
+NSE:GAEL-EQ,Gujarat Ambuja Exports Ltd.,Fast Moving Consumer Goods,INE036B01030,nifty_total_market.csv
+NSE:GAIL-EQ,GAIL (India) Ltd.,Oil Gas & Consumable Fuels,INE129A01019,nifty500.csv
+NSE:GALLANTT-EQ,Gallantt Ispat Ltd.,Capital Goods,INE297H01019,nifty_total_market.csv
+NSE:GESHIP-EQ,Great Eastern Shipping Co. Ltd.,Services,INE017A01032,nifty500.csv
+NSE:GHCL-EQ,GHCL Ltd.,Chemicals,INE539A01019,nifty_total_market.csv
+NSE:GICRE-EQ,General Insurance Corporation of India,Financial Services,INE481Y01014,nifty500.csv
+NSE:GILLETTE-EQ,Gillette India Ltd.,Fast Moving Consumer Goods,INE322A01010,nifty500.csv
+NSE:GLAND-EQ,Gland Pharma Ltd.,Healthcare,INE068V01023,nifty500.csv
+NSE:GLAXO-EQ,Glaxosmithkline Pharmaceuticals Ltd.,Healthcare,INE159A01016,nifty500.csv
+NSE:GLENMARK-EQ,Glenmark Pharmaceuticals Ltd.,Healthcare,INE935A01035,nifty500.csv
+NSE:GMDCLTD-EQ,Gujarat Mineral Development Corporation Ltd.,Metals & Mining,INE131A01031,nifty500.csv
+NSE:GMMPFAUDLR-EQ,GMM Pfaudler Ltd.,Capital Goods,INE541A01023,nifty_total_market.csv
+NSE:GMRAIRPORT-EQ,GMR Airports Ltd.,Services,INE776C01039,nifty500.csv
+NSE:GMRP&UI-EQ,GMR Power and Urban Infra Ltd.,Power,INE0CU601026,nifty_total_market.csv
+NSE:GNFC-EQ,Gujarat Narmada Valley Fertilizers and Chemicals Ltd.,Chemicals,INE113A01013,nifty_total_market.csv
+NSE:GODFRYPHLP-EQ,Godfrey Phillips India Ltd.,Fast Moving Consumer Goods,INE260B01028,nifty500.csv
+NSE:GODIGIT-EQ,Go Digit General Insurance Ltd.,Financial Services,INE03JT01014,nifty500.csv
+NSE:GODREJAGRO-EQ,Godrej Agrovet Ltd.,Fast Moving Consumer Goods,INE850D01014,nifty500.csv
+NSE:GODREJCP-EQ,Godrej Consumer Products Ltd.,Fast Moving Consumer Goods,INE102D01028,nifty500.csv
+NSE:GODREJIND-EQ,Godrej Industries Ltd.,Diversified,INE233A01035,nifty500.csv
+NSE:GODREJPROP-EQ,Godrej Properties Ltd.,Realty,INE484J01027,nifty500.csv
+NSE:GOKEX-EQ,Gokaldas Exports Ltd.,Textiles,INE887G01027,nifty_total_market.csv
+NSE:GOKULAGRO-EQ,Gokul Agro Resources Ltd.,Fast Moving Consumer Goods,INE314T01033,nifty_total_market.csv
+NSE:GPIL-EQ,Godawari Power & Ispat Ltd.,Capital Goods,INE177H01039,nifty500.csv
+NSE:GPPL-EQ,Gujarat Pipavav Port Ltd.,Services,INE517F01014,nifty_total_market.csv
+NSE:GRANULES-EQ,Granules India Ltd.,Healthcare,INE101D01020,nifty500.csv
+NSE:GRAPHITE-EQ,Graphite India Ltd.,Capital Goods,INE371A01025,nifty500.csv
+NSE:GRASIM-EQ,Grasim Industries Ltd.,Construction Materials,INE047A01021,nifty500.csv
+NSE:GRAVITA-EQ,Gravita India Ltd.,Metals & Mining,INE024L01027,nifty500.csv
+NSE:GREAVESCOT-EQ,Greaves Cotton Ltd.,Capital Goods,INE224A01026,nifty_total_market.csv
+NSE:GROWW-EQ,Billionbrains Garage Ventures Ltd.,Financial Services,INE0HOQ01053,nifty_total_market.csv
+NSE:GRSE-EQ,Garden Reach Shipbuilders & Engineers Ltd.,Capital Goods,INE382Z01011,nifty500.csv
+NSE:GRWRHITECH-EQ,Garware Hi-Tech Films Ltd.,Capital Goods,INE291A01017,nifty_total_market.csv
+NSE:GSFC-EQ,Gujarat State Fertilizers & Chemicals Ltd.,Chemicals,INE026A01025,nifty_total_market.csv
+NSE:GSPL-EQ,Gujarat State Petronet Ltd.,Oil Gas & Consumable Fuels,INE246F01010,nifty500.csv
+NSE:GUJGASLTD-EQ,Gujarat Gas Ltd.,Oil Gas & Consumable Fuels,INE844O01030,nifty500.csv
+NSE:GVT&D-EQ,GE Vernova T&D India Ltd.,Capital Goods,INE200A01026,nifty500.csv
+NSE:HAL-EQ,Hindustan Aeronautics Ltd.,Capital Goods,INE066F01020,nifty500.csv
+NSE:HAPPSTMNDS-EQ,Happiest Minds Technologies Ltd.,Information Technology,INE419U01012,nifty500.csv
+NSE:HAVELLS-EQ,Havells India Ltd.,Consumer Durables,INE176B01034,nifty500.csv
+NSE:HBLENGINE-EQ,HBL Engineering Ltd.,Capital Goods,INE292B01021,nifty500.csv
+NSE:HCC-EQ,Hindustan Construction Co. Ltd.,Construction,INE549A01026,nifty_total_market.csv
+NSE:HCG-EQ,Healthcare Global Enterprises Ltd.,Healthcare,INE075I01017,nifty_total_market.csv
+NSE:HCLTECH-EQ,HCL Technologies Ltd.,Information Technology,INE860A01027,nifty500.csv
+NSE:HDBFS-EQ,HDB Financial Services Ltd.,Financial Services,INE756I01012,nifty_total_market.csv
+NSE:HDFCAMC-EQ,HDFC Asset Management Company Ltd.,Financial Services,INE127D01025,nifty500.csv
+NSE:HDFCBANK-EQ,HDFC Bank Ltd.,Financial Services,INE040A01034,nifty500.csv
+NSE:HDFCLIFE-EQ,HDFC Life Insurance Company Ltd.,Financial Services,INE795G01014,nifty500.csv
+NSE:HEG-EQ,H.E.G. Ltd.,Capital Goods,INE545A01024,nifty500.csv
+NSE:HEMIPROP-EQ,Hemisphere Properties India Ltd.,Services,INE0AJG01018,nifty_total_market.csv
+NSE:HERITGFOOD-EQ,Heritage Foods Ltd.,Fast Moving Consumer Goods,INE978A01027,nifty_total_market.csv
+NSE:HEROMOTOCO-EQ,Hero MotoCorp Ltd.,Automobile and Auto Components,INE158A01026,nifty500.csv
+NSE:HEXT-EQ,Hexaware Technologies Ltd.,Information Technology,INE093A01041,nifty500.csv
+NSE:HFCL-EQ,HFCL Ltd.,Telecommunication,INE548A01028,nifty500.csv
+NSE:HGINFRA-EQ,H.G. Infra Engineering Ltd.,Construction,INE926X01010,nifty_total_market.csv
+NSE:HINDALCO-EQ,Hindalco Industries Ltd.,Metals & Mining,INE038A01020,nifty500.csv
+NSE:HINDCOPPER-EQ,Hindustan Copper Ltd.,Metals & Mining,INE531E01026,nifty500.csv
+NSE:HINDPETRO-EQ,Hindustan Petroleum Corporation Ltd.,Oil Gas & Consumable Fuels,INE094A01015,nifty500.csv
+NSE:HINDUNILVR-EQ,Hindustan Unilever Ltd.,Fast Moving Consumer Goods,INE030A01027,nifty500.csv
+NSE:HINDZINC-EQ,Hindustan Zinc Ltd.,Metals & Mining,INE267A01025,nifty500.csv
+NSE:HOMEFIRST-EQ,Home First Finance Company India Ltd.,Financial Services,INE481N01025,nifty500.csv
+NSE:HONASA-EQ,Honasa Consumer Ltd.,Fast Moving Consumer Goods,INE0J5401028,nifty500.csv
+NSE:HONAUT-EQ,Honeywell Automation India Ltd.,Capital Goods,INE671A01010,nifty500.csv
+NSE:HSCL-EQ,Himadri Speciality Chemical Ltd.,Chemicals,INE019C01026,nifty500.csv
+NSE:HUDCO-EQ,Housing & Urban Development Corporation Ltd.,Financial Services,INE031A01017,nifty500.csv
+NSE:HYUNDAI-EQ,Hyundai Motor India Ltd.,Automobile and Auto Components,INE0V6F01027,nifty500.csv
+NSE:ICICIAMC-EQ,ICICI Prudential Asset Management Company Ltd.,Financial Services,INE346A01027,nifty_total_market.csv
+NSE:ICICIBANK-EQ,ICICI Bank Ltd.,Financial Services,INE090A01021,nifty500.csv
+NSE:ICICIGI-EQ,ICICI Lombard General Insurance Company Ltd.,Financial Services,INE765G01017,nifty500.csv
+NSE:ICICIPRULI-EQ,ICICI Prudential Life Insurance Company Ltd.,Financial Services,INE726G01019,nifty500.csv
+NSE:ICIL-EQ,Indo Count Industries Ltd.,Textiles,INE483B01026,nifty_total_market.csv
+NSE:IDBI-EQ,IDBI Bank Ltd.,Financial Services,INE008A01015,nifty500.csv
+NSE:IDEA-EQ,Vodafone Idea Ltd.,Telecommunication,INE669E01016,nifty500.csv
+NSE:IDFCFIRSTB-EQ,IDFC First Bank Ltd.,Financial Services,INE092T01019,nifty500.csv
+NSE:IEX-EQ,Indian Energy Exchange Ltd.,Financial Services,INE022Q01020,nifty500.csv
+NSE:IFBIND-EQ,IFB Industries Ltd.,Consumer Durables,INE559A01017,nifty_total_market.csv
+NSE:IFCI-EQ,IFCI Ltd.,Financial Services,INE039A01010,nifty500.csv
+NSE:IGIL-EQ,International Gemmological Institute (India) Ltd.,Services,INE0Q9301021,nifty500.csv
+NSE:IGL-EQ,Indraprastha Gas Ltd.,Oil Gas & Consumable Fuels,INE203G01027,nifty500.csv
+NSE:IIFL-EQ,IIFL Finance Ltd.,Financial Services,INE530B01024,nifty500.csv
+NSE:IIFLCAPS-EQ,IIFL Capital Services Ltd.,Financial Services,INE489L01022,nifty_total_market.csv
+NSE:IKS-EQ,Inventurus Knowledge Solutions Ltd.,Information Technology,INE115Q01022,nifty500.csv
+NSE:IMFA-EQ,Indian Metals & Ferro Alloys Ltd.,Metals & Mining,INE919H01018,nifty_total_market.csv
+NSE:INDGN-EQ,Indegene Ltd.,Healthcare,INE065X01017,nifty500.csv
+NSE:INDHOTEL-EQ,Indian Hotels Co. Ltd.,Consumer Services,INE053A01029,nifty500.csv
+NSE:INDIACEM-EQ,India Cements Ltd.,Construction Materials,INE383A01012,nifty500.csv
+NSE:INDIAGLYCO-EQ,India Glycols Ltd.,Fast Moving Consumer Goods,INE560A01023,nifty_total_market.csv
+NSE:INDIAMART-EQ,Indiamart Intermesh Ltd.,Consumer Services,INE933S01016,nifty500.csv
+NSE:INDIANB-EQ,Indian Bank,Financial Services,INE562A01011,nifty500.csv
+NSE:INDIASHLTR-EQ,India Shelter Finance Corporation Ltd.,Financial Services,INE922K01024,nifty_total_market.csv
+NSE:INDIGO-EQ,InterGlobe Aviation Ltd.,Services,INE646L01027,nifty500.csv
+NSE:INDIGOPNTS-EQ,Indigo Paints Ltd.,Consumer Durables,INE09VQ01012,nifty_total_market.csv
+NSE:INDUSINDBK-EQ,IndusInd Bank Ltd.,Financial Services,INE095A01012,nifty500.csv
+NSE:INDUSTOWER-EQ,Indus Towers Ltd.,Telecommunication,INE121J01017,nifty500.csv
+NSE:INFY-EQ,Infosys Ltd.,Information Technology,INE009A01021,nifty500.csv
+NSE:INOXGREEN-EQ,Inox Green Energy Services Ltd.,Services,INE510W01014,nifty_total_market.csv
+NSE:INOXINDIA-EQ,INOX India Ltd.,Capital Goods,INE616N01034,nifty500.csv
+NSE:INOXWIND-EQ,Inox Wind Ltd.,Capital Goods,INE066P01011,nifty500.csv
+NSE:INTELLECT-EQ,Intellect Design Arena Ltd.,Information Technology,INE306R01017,nifty500.csv
+NSE:IOB-EQ,Indian Overseas Bank,Financial Services,INE565A01014,nifty500.csv
+NSE:IOC-EQ,Indian Oil Corporation Ltd.,Oil Gas & Consumable Fuels,INE242A01010,nifty500.csv
+NSE:IONEXCHANG-EQ,Ion Exchange (India) Ltd.,Utilities,INE570A01022,nifty_total_market.csv
+NSE:IPCALAB-EQ,Ipca Laboratories Ltd.,Healthcare,INE571A01038,nifty500.csv
+NSE:IRB-EQ,IRB Infrastructure Developers Ltd.,Construction,INE821I01022,nifty500.csv
+NSE:IRCON-EQ,IRCON International Ltd.,Construction,INE962Y01021,nifty500.csv
+NSE:IRCTC-EQ,Indian Railway Catering And Tourism Corporation Ltd.,Consumer Services,INE335Y01020,nifty500.csv
+NSE:IREDA-EQ,Indian Renewable Energy Development Agency Ltd.,Financial Services,INE202E01016,nifty500.csv
+NSE:IRFC-EQ,Indian Railway Finance Corporation Ltd.,Financial Services,INE053F01010,nifty500.csv
+NSE:ITC-EQ,ITC Ltd.,Fast Moving Consumer Goods,INE154A01025,nifty500.csv
+NSE:ITCHOTELS-EQ,ITC Hotels Ltd.,Consumer Services,INE379A01028,nifty500.csv
+NSE:ITI-EQ,ITI Ltd.,Telecommunication,INE248A01017,nifty500.csv
+NSE:IXIGO-EQ,Le Travenues Technology Ltd.,Consumer Services,INE0HV901016,nifty_total_market.csv
+NSE:J&KBANK-EQ,Jammu & Kashmir Bank Ltd.,Financial Services,INE168A01041,nifty500.csv
+NSE:JAIBALAJI-EQ,Jai Balaji Industries Ltd.,Metals & Mining,INE091G01026,nifty_total_market.csv
+NSE:JAINREC-EQ,Jain Resource Recycling Ltd.,Metals & Mining,INE0YD401026,nifty_total_market.csv
+NSE:JAMNAAUTO-EQ,Jamna Auto Industries Ltd.,Automobile and Auto Components,INE039C01032,nifty_total_market.csv
+NSE:JAYNECOIND-EQ,Jayaswal Neco Industries Ltd.,Capital Goods,INE854B01010,nifty_total_market.csv
+NSE:JBCHEPHARM-EQ,J.B. Chemicals & Pharmaceuticals Ltd.,Healthcare,INE572A01036,nifty500.csv
+NSE:JBMA-EQ,JBM Auto Ltd.,Automobile and Auto Components,INE927D01051,nifty500.csv
+NSE:JINDALSAW-EQ,Jindal Saw Ltd.,Capital Goods,INE324A01032,nifty500.csv
+NSE:JINDALSTEL-EQ,Jindal Steel Ltd.,Metals & Mining,INE749A01030,nifty500.csv
+NSE:JIOFIN-EQ,Jio Financial Services Ltd.,Financial Services,INE758E01017,nifty500.csv
+NSE:JKCEMENT-EQ,J.K. Cement Ltd.,Construction Materials,INE823G01014,nifty500.csv
+NSE:JKLAKSHMI-EQ,JK Lakshmi Cement Ltd.,Construction Materials,INE786A01032,nifty_total_market.csv
+NSE:JKPAPER-EQ,JK Paper Ltd.,Forest Materials,INE789E01012,nifty_total_market.csv
+NSE:JKTYRE-EQ,JK Tyre & Industries Ltd.,Automobile and Auto Components,INE573A01042,nifty500.csv
+NSE:JLHL-EQ,Jupiter Life Line Hospitals Ltd.,Healthcare,INE682M01012,nifty_total_market.csv
+NSE:JMFINANCIL-EQ,JM Financial Ltd.,Financial Services,INE780C01023,nifty500.csv
+NSE:JPPOWER-EQ,Jaiprakash Power Ventures Ltd.,Power,INE351F01018,nifty500.csv
+NSE:JSFB-EQ,Jana Small Finance Bank Ltd.,Financial Services,INE953L01027,nifty_total_market.csv
+NSE:JSL-EQ,Jindal Stainless Ltd.,Metals & Mining,INE220G01021,nifty500.csv
+NSE:JSLL-EQ,Jeena Sikho Lifecare Ltd.,Consumer Services,INE0J5801029,nifty_total_market.csv
+NSE:JSWCEMENT-EQ,JSW Cement Ltd.,Construction Materials,INE718I01012,nifty500.csv
+NSE:JSWENERGY-EQ,JSW Energy Ltd.,Power,INE121E01018,nifty500.csv
+NSE:JSWINFRA-EQ,JSW Infrastructure Ltd.,Services,INE880J01026,nifty500.csv
+NSE:JSWSTEEL-EQ,JSW Steel Ltd.,Metals & Mining,INE019A01038,nifty500.csv
+NSE:JUBLFOOD-EQ,Jubilant Foodworks Ltd.,Consumer Services,INE797F01020,nifty500.csv
+NSE:JUBLINGREA-EQ,Jubilant Ingrevia Ltd.,Chemicals,INE0BY001018,nifty500.csv
+NSE:JUBLPHARMA-EQ,Jubilant Pharmova Ltd.,Healthcare,INE700A01033,nifty500.csv
+NSE:JUSTDIAL-EQ,Justdial Ltd.,Consumer Services,INE599M01018,nifty_total_market.csv
+NSE:JWL-EQ,Jupiter Wagons Ltd.,Capital Goods,INE209L01016,nifty500.csv
+NSE:JYOTHYLAB-EQ,Jyothy Labs Ltd.,Fast Moving Consumer Goods,INE668F01031,nifty500.csv
+NSE:JYOTICNC-EQ,Jyoti CNC Automation Ltd.,Capital Goods,INE980O01024,nifty500.csv
+NSE:KAJARIACER-EQ,Kajaria Ceramics Ltd.,Consumer Durables,INE217B01036,nifty500.csv
+NSE:KALYANKJIL-EQ,Kalyan Jewellers India Ltd.,Consumer Durables,INE303R01014,nifty500.csv
+NSE:KANSAINER-EQ,Kansai Nerolac Paints Ltd.,Consumer Durables,INE531A01024,nifty_total_market.csv
+NSE:KARURVYSYA-EQ,Karur Vysya Bank Ltd.,Financial Services,INE036D01028,nifty500.csv
+NSE:KAYNES-EQ,Kaynes Technology India Ltd.,Capital Goods,INE918Z01012,nifty500.csv
+NSE:KEC-EQ,Kec International Ltd.,Construction,INE389H01022,nifty500.csv
+NSE:KEI-EQ,KEI Industries Ltd.,Capital Goods,INE878B01027,nifty500.csv
+NSE:KFINTECH-EQ,Kfin Technologies Ltd.,Financial Services,INE138Y01010,nifty500.csv
+NSE:KIMS-EQ,Krishna Institute of Medical Sciences Ltd.,Healthcare,INE967H01025,nifty500.csv
+NSE:KIRLOSBROS-EQ,Kirloskar Brothers Ltd.,Capital Goods,INE732A01036,nifty500.csv
+NSE:KIRLOSENG-EQ,Kirloskar Oil Eng Ltd.,Capital Goods,INE146L01010,nifty500.csv
+NSE:KIRLPNU-EQ,Kirloskar Pneumatic Company Ltd.,Capital Goods,INE811A01020,nifty_total_market.csv
+NSE:KITEX-EQ,Kitex Garments Ltd.,Textiles,INE602G01020,nifty_total_market.csv
+NSE:KNRCON-EQ,KNR Constructions Ltd.,Construction,INE634I01029,nifty_total_market.csv
+NSE:KOTAKBANK-EQ,Kotak Mahindra Bank Ltd.,Financial Services,INE237A01036,nifty500.csv
+NSE:KPIGREEN-EQ,KPI Green Energy Ltd.,Power,INE542W01025,nifty_total_market.csv
+NSE:KPIL-EQ,Kalpataru Projects International Ltd.,Construction,INE220B01022,nifty500.csv
+NSE:KPITTECH-EQ,KPIT Technologies Ltd.,Information Technology,INE04I401011,nifty500.csv
+NSE:KPRMILL-EQ,K.P.R. Mill Ltd.,Textiles,INE930H01031,nifty500.csv
+NSE:KRBL-EQ,KRBL Ltd.,Fast Moving Consumer Goods,INE001B01026,nifty_total_market.csv
+NSE:KRN-EQ,KRN Heat Exchanger and Refrigeration Ltd.,Capital Goods,INE0Q3J01015,nifty_total_market.csv
+NSE:KSB-EQ,KSB Ltd.,Capital Goods,INE999A01023,nifty500.csv
+NSE:KSCL-EQ,Kaveri Seed Company Ltd.,Fast Moving Consumer Goods,INE455I01029,nifty_total_market.csv
+NSE:KTKBANK-EQ,Karnataka Bank Ltd.,Financial Services,INE614B01018,nifty_total_market.csv
+NSE:LALPATHLAB-EQ,Dr. Lal Path Labs Ltd.,Healthcare,INE600L01024,nifty500.csv
+NSE:LATENTVIEW-EQ,Latent View Analytics Ltd.,Information Technology,INE0I7C01011,nifty500.csv
+NSE:LAURUSLABS-EQ,Laurus Labs Ltd.,Healthcare,INE947Q01028,nifty500.csv
+NSE:LEMONTREE-EQ,Lemon Tree Hotels Ltd.,Consumer Services,INE970X01018,nifty500.csv
+NSE:LENSKART-EQ,Lenskart Solutions Ltd.,Consumer Services,INE956O01016,nifty_total_market.csv
+NSE:LGEINDIA-EQ,LG Electronics India Ltd.,Consumer Durables,INE324D01010,nifty_total_market.csv
+NSE:LICHSGFIN-EQ,LIC Housing Finance Ltd.,Financial Services,INE115A01026,nifty500.csv
+NSE:LICI-EQ,Life Insurance Corporation of India,Financial Services,INE0J1Y01017,nifty500.csv
+NSE:LINDEINDIA-EQ,Linde India Ltd.,Chemicals,INE473A01011,nifty500.csv
+NSE:LLOYDSENGG-EQ,Lloyds Engineering Works Ltd.,Capital Goods,INE093R01011,nifty_total_market.csv
+NSE:LLOYDSENT-EQ,Lloyds Enterprises Ltd.,Metals & Mining,INE080I01025,nifty_total_market.csv
+NSE:LLOYDSME-EQ,Lloyds Metals And Energy Ltd.,Metals & Mining,INE281B01032,nifty500.csv
+NSE:LODHA-EQ,Lodha Developers Ltd.,Realty,INE670K01029,nifty500.csv
+NSE:LOTUSDEV-EQ,Sri Lotus Developers and Realty Ltd.,Realty,INE0V9Q01010,nifty_total_market.csv
+NSE:LT-EQ,Larsen & Toubro Ltd.,Construction,INE018A01030,nifty500.csv
+NSE:LTF-EQ,L&T Finance Ltd.,Financial Services,INE498L01015,nifty500.csv
+NSE:LTFOODS-EQ,LT Foods Ltd.,Fast Moving Consumer Goods,INE818H01020,nifty500.csv
+NSE:LTM-EQ,LTIMindtree Ltd.,Information Technology,INE214T01019,nifty500.csv
+NSE:LTTS-EQ,L&T Technology Services Ltd.,Information Technology,INE010V01017,nifty500.csv
+NSE:LUMAXTECH-EQ,Lumax Auto Technologies Ltd.,Automobile and Auto Components,INE872H01027,nifty_total_market.csv
+NSE:LUPIN-EQ,Lupin Ltd.,Healthcare,INE326A01037,nifty500.csv
+NSE:LXCHEM-EQ,Laxmi Organic Industries Ltd.,Chemicals,INE576O01020,nifty_total_market.csv
+NSE:M&M-EQ,Mahindra & Mahindra Ltd.,Automobile and Auto Components,INE101A01026,nifty500.csv
+NSE:M&MFIN-EQ,Mahindra & Mahindra Financial Services Ltd.,Financial Services,INE774D01024,nifty500.csv
+NSE:MAHABANK-EQ,Bank of Maharashtra,Financial Services,INE457A01014,nifty500.csv
+NSE:MAHSCOOTER-EQ,Maharashtra Scooters Ltd.,Financial Services,INE288A01013,nifty500.csv
+NSE:MAHSEAMLES-EQ,Maharashtra Seamless Ltd.,Capital Goods,INE271B01025,nifty500.csv
+NSE:MANAPPURAM-EQ,Manappuram Finance Ltd.,Financial Services,INE522D01027,nifty500.csv
+NSE:MANKIND-EQ,Mankind Pharma Ltd.,Healthcare,INE634S01028,nifty500.csv
+NSE:MANORAMA-EQ,Manorama Industries Ltd.,Fast Moving Consumer Goods,INE00VM01036,nifty_total_market.csv
+NSE:MANYAVAR-EQ,Vedant Fashions Ltd.,Consumer Services,INE825V01034,nifty500.csv
+NSE:MAPMYINDIA-EQ,C.E. Info Systems Ltd.,Information Technology,INE0BV301023,nifty500.csv
+NSE:MARICO-EQ,Marico Ltd.,Fast Moving Consumer Goods,INE196A01026,nifty500.csv
+NSE:MARKSANS-EQ,Marksans Pharma Ltd.,Healthcare,INE750C01026,nifty_total_market.csv
+NSE:MARUTI-EQ,Maruti Suzuki India Ltd.,Automobile and Auto Components,INE585B01010,nifty500.csv
+NSE:MASTEK-EQ,Mastek Ltd.,Information Technology,INE759A01021,nifty_total_market.csv
+NSE:MAXHEALTH-EQ,Max Healthcare Institute Ltd.,Healthcare,INE027H01010,nifty500.csv
+NSE:MAZDOCK-EQ,Mazagoan Dock Shipbuilders Ltd.,Capital Goods,INE249Z01020,nifty500.csv
+NSE:MCX-EQ,Multi Commodity Exchange of India Ltd.,Financial Services,INE745G01043,nifty500.csv
+NSE:MEDANTA-EQ,Global Health Ltd.,Healthcare,INE474Q01031,nifty500.csv
+NSE:MEDPLUS-EQ,Medplus Health Services Ltd.,Consumer Services,INE804L01022,nifty_total_market.csv
+NSE:MEESHO-EQ,Meesho Ltd.,Consumer Services,INE0VDM01015,nifty_total_market.csv
+NSE:METROPOLIS-EQ,Metropolis Healthcare Ltd.,Healthcare,INE112L01020,nifty500.csv
+NSE:MFSL-EQ,Max Financial Services Ltd.,Financial Services,INE180A01020,nifty500.csv
+NSE:MGL-EQ,Mahanagar Gas Ltd.,Oil Gas & Consumable Fuels,INE002S01010,nifty500.csv
+NSE:MIDHANI-EQ,Mishra Dhatu Nigam Ltd.,Capital Goods,INE099Z01011,nifty_total_market.csv
+NSE:MINDACORP-EQ,Minda Corporation Ltd.,Automobile and Auto Components,INE842C01021,nifty500.csv
+NSE:MMTC-EQ,MMTC Ltd.,Services,INE123F01029,nifty500.csv
+NSE:MOIL-EQ,MOIL Ltd.,Metals & Mining,INE490G01020,nifty_total_market.csv
+NSE:MOTHERSON-EQ,Samvardhana Motherson International Ltd.,Automobile and Auto Components,INE775A01035,nifty500.csv
+NSE:MOTILALOFS-EQ,Motilal Oswal Financial Services Ltd.,Financial Services,INE338I01027,nifty500.csv
+NSE:MPHASIS-EQ,MphasiS Ltd.,Information Technology,INE356A01018,nifty500.csv
+NSE:MRF-EQ,MRF Ltd.,Automobile and Auto Components,INE883A01011,nifty500.csv
+NSE:MRPL-EQ,Mangalore Refinery & Petrochemicals Ltd.,Oil Gas & Consumable Fuels,INE103A01014,nifty500.csv
+NSE:MSTCLTD-EQ,MSTC Ltd.,Services,INE255X01014,nifty_total_market.csv
+NSE:MSUMI-EQ,Motherson Sumi Wiring India Ltd.,Automobile and Auto Components,INE0FS801015,nifty500.csv
+NSE:MTARTECH-EQ,MTAR Technologies Ltd.,Capital Goods,INE864I01014,nifty_total_market.csv
+NSE:MUTHOOTFIN-EQ,Muthoot Finance Ltd.,Financial Services,INE414G01012,nifty500.csv
+NSE:NAM-INDIA-EQ,Nippon Life India Asset Management Ltd.,Financial Services,INE298J01013,nifty_total_market.csv
+NSE:NATCOPHARM-EQ,NATCO Pharma Ltd.,Healthcare,INE987B01026,nifty500.csv
+NSE:NATIONALUM-EQ,National Aluminium Co. Ltd.,Metals & Mining,INE139A01034,nifty500.csv
+NSE:NAUKRI-EQ,Info Edge (India) Ltd.,Consumer Services,INE663F01032,nifty500.csv
+NSE:NAVA-EQ,Nava Ltd.,Power,INE725A01030,nifty500.csv
+NSE:NAVINFLUOR-EQ,Navin Fluorine International Ltd.,Chemicals,INE048G01026,nifty500.csv
+NSE:NAZARA-EQ,Nazara Technologies Ltd.,Media Entertainment & Publication,INE418L01047,nifty_total_market.csv
+NSE:NBCC-EQ,NBCC (India) Ltd.,Construction,INE095N01031,nifty500.csv
+NSE:NCC-EQ,NCC Ltd.,Construction,INE868B01028,nifty500.csv
+NSE:NEOGEN-EQ,NEOGEN CHEMICALS LTD.,Chemicals,INE136S01016,nifty_total_market.csv
+NSE:NESCO-EQ,NESCO Ltd.,Services,INE317F01035,nifty_total_market.csv
+NSE:NESTLEIND-EQ,Nestle India Ltd.,Fast Moving Consumer Goods,INE239A01024,nifty500.csv
+NSE:NETWEB-EQ,Netweb Technologies India Ltd.,Information Technology,INE0NT901020,nifty500.csv
+NSE:NETWORK18-EQ,Network18 Media & Investments Ltd.,Media Entertainment & Publication,INE870H01013,nifty_total_market.csv
+NSE:NEULANDLAB-EQ,Neuland Laboratories Ltd.,Healthcare,INE794A01010,nifty500.csv
+NSE:NEWGEN-EQ,Newgen Software Technologies Ltd.,Information Technology,INE619B01017,nifty500.csv
+NSE:NFL-EQ,National Fertilizers Ltd.,Chemicals,INE870D01012,nifty_total_market.csv
+NSE:NH-EQ,Narayana Hrudayalaya Ltd.,Healthcare,INE410P01011,nifty500.csv
+NSE:NHPC-EQ,NHPC Ltd.,Power,INE848E01016,nifty500.csv
+NSE:NIACL-EQ,The New India Assurance Company Ltd.,Financial Services,INE470Y01017,nifty500.csv
+NSE:NIVABUPA-EQ,Niva Bupa Health Insurance Company Ltd.,Financial Services,INE995S01015,nifty500.csv
+NSE:NLCINDIA-EQ,NLC India Ltd.,Power,INE589A01014,nifty500.csv
+NSE:NMDC-EQ,NMDC Ltd.,Metals & Mining,INE584A01023,nifty500.csv
+NSE:NSLNISP-EQ,NMDC Steel Ltd.,Metals & Mining,INE0NNS01018,nifty500.csv
+NSE:NTPC-EQ,NTPC Ltd.,Power,INE733E01010,nifty500.csv
+NSE:NTPCGREEN-EQ,NTPC Green Energy Ltd.,Power,INE0ONG01011,nifty500.csv
+NSE:NUVAMA-EQ,Nuvama Wealth Management Ltd.,Financial Services,INE531F01023,nifty500.csv
+NSE:NUVOCO-EQ,Nuvoco Vistas Corporation Ltd.,Construction Materials,INE118D01016,nifty500.csv
+NSE:NYKAA-EQ,FSN E-Commerce Ventures Ltd.,Consumer Services,INE388Y01029,nifty500.csv
+NSE:OBEROIRLTY-EQ,Oberoi Realty Ltd.,Realty,INE093I01010,nifty500.csv
+NSE:OFSS-EQ,Oracle Financial Services Software Ltd.,Information Technology,INE881D01027,nifty500.csv
+NSE:OIL-EQ,Oil India Ltd.,Oil Gas & Consumable Fuels,INE274J01014,nifty500.csv
+NSE:OLAELEC-EQ,Ola Electric Mobility Ltd.,Automobile and Auto Components,INE0LXG01040,nifty500.csv
+NSE:OLECTRA-EQ,Olectra Greentech Ltd.,Automobile and Auto Components,INE260D01016,nifty500.csv
+NSE:ONESOURCE-EQ,Onesource Specialty Pharma Ltd.,Healthcare,INE013P01021,nifty500.csv
+NSE:ONGC-EQ,Oil & Natural Gas Corporation Ltd.,Oil Gas & Consumable Fuels,INE213A01029,nifty500.csv
+NSE:OPTIEMUS-EQ,Optiemus Infracom Ltd.,Telecommunication,INE350C01017,nifty_total_market.csv
+NSE:ORIENTCEM-EQ,Orient Cement Ltd.,Construction Materials,INE876N01018,nifty_total_market.csv
+NSE:ORKLAINDIA-EQ,Orkla India Ltd.,Fast Moving Consumer Goods,INE16NZ01023,nifty_total_market.csv
+NSE:OSWALPUMPS-EQ,Oswal Pumps Ltd.,Capital Goods,INE0BYP01024,nifty_total_market.csv
+NSE:PAGEIND-EQ,Page Industries Ltd.,Textiles,INE761H01022,nifty500.csv
+NSE:PARADEEP-EQ,Paradeep Phosphates Ltd.,Chemicals,INE088F01024,nifty_total_market.csv
+NSE:PARAS-EQ,Paras Defence and Space Technologies Ltd.,Capital Goods,INE045601023,nifty_total_market.csv
+NSE:PARKHOSPS-EQ,Park Medi World Ltd.,Healthcare,INE119201023,nifty_total_market.csv
+NSE:PATANJALI-EQ,Patanjali Foods Ltd.,Fast Moving Consumer Goods,INE619A01035,nifty500.csv
+NSE:PAYTM-EQ,One 97 Communications Ltd.,Financial Services,INE982J01020,nifty500.csv
+NSE:PCBL-EQ,PCBL Chemical Ltd.,Chemicals,INE602A01031,nifty500.csv
+NSE:PCJEWELLER-EQ,PC Jeweller Ltd.,Consumer Durables,INE785M01021,nifty_total_market.csv
+NSE:PERSISTENT-EQ,Persistent Systems Ltd.,Information Technology,INE262H01021,nifty500.csv
+NSE:PETRONET-EQ,Petronet LNG Ltd.,Oil Gas & Consumable Fuels,INE347G01014,nifty500.csv
+NSE:PFC-EQ,Power Finance Corporation Ltd.,Financial Services,INE134E01011,nifty500.csv
+NSE:PFIZER-EQ,Pfizer Ltd.,Healthcare,INE182A01018,nifty500.csv
+NSE:PFOCUS-EQ,Prime Focus Ltd,Media Entertainment & Publication,INE367G01038,nifty_total_market.csv
+NSE:PGEL-EQ,PG Electroplast Ltd.,Consumer Durables,INE457L01029,nifty500.csv
+NSE:PGHH-EQ,Procter & Gamble Hygiene & Health Care Ltd.,Fast Moving Consumer Goods,INE179A01014,nifty500.csv
+NSE:PGIL-EQ,Pearl Global Industries Ltd.,Textiles,INE940H01022,nifty_total_market.csv
+NSE:PHOENIXLTD-EQ,Phoenix Mills Ltd.,Realty,INE211B01039,nifty500.csv
+NSE:PICCADIL-EQ,Piccadily Agro Industries Ltd.,Fast Moving Consumer Goods,INE546C01010,nifty_total_market.csv
+NSE:PIDILITIND-EQ,Pidilite Industries Ltd.,Chemicals,INE318A01026,nifty500.csv
+NSE:PIIND-EQ,PI Industries Ltd.,Chemicals,INE603J01030,nifty500.csv
+NSE:PINELABS-EQ,Pine Labs Ltd.,Financial Services,INE15B701018,nifty_total_market.csv
+NSE:PIRAMALFIN-EQ,Piramal Finance Ltd.,Financial Services,INE202B01038,nifty_total_market.csv
+NSE:PNB-EQ,Punjab National Bank,Financial Services,INE160A01022,nifty500.csv
+NSE:PNBHOUSING-EQ,PNB Housing Finance Ltd.,Financial Services,INE572E01012,nifty500.csv
+NSE:PNCINFRA-EQ,PNC Infratech Ltd.,Construction,INE195J01029,nifty_total_market.csv
+NSE:PNGJL-EQ,P N Gadgil Jewellers Ltd.,Consumer Durables,INE953R01016,nifty_total_market.csv
+NSE:POLICYBZR-EQ,PB Fintech Ltd.,Financial Services,INE417T01026,nifty500.csv
+NSE:POLYCAB-EQ,Polycab India Ltd.,Capital Goods,INE455K01017,nifty500.csv
+NSE:POLYMED-EQ,Poly Medicure Ltd.,Healthcare,INE205C01021,nifty500.csv
+NSE:POONAWALLA-EQ,Poonawalla Fincorp Ltd.,Financial Services,INE511C01022,nifty500.csv
+NSE:POWERGRID-EQ,Power Grid Corporation of India Ltd.,Power,INE752E01010,nifty500.csv
+NSE:POWERINDIA-EQ,Hitachi Energy India Ltd.,Capital Goods,INE07Y701011,nifty500.csv
+NSE:POWERMECH-EQ,Power Mech Projects Ltd.,Construction,INE211R01019,nifty_total_market.csv
+NSE:PPLPHARMA-EQ,Piramal Pharma Ltd.,Healthcare,INE0DK501011,nifty500.csv
+NSE:PRAJIND-EQ,Praj Industries Ltd.,Capital Goods,INE074A01025,nifty500.csv
+NSE:PREMIERENE-EQ,Premier Energies Ltd.,Capital Goods,INE0BS701011,nifty500.csv
+NSE:PRESTIGE-EQ,Prestige Estates Projects Ltd.,Realty,INE811K01011,nifty500.csv
+NSE:PRICOLLTD-EQ,Pricol Ltd.,Automobile and Auto Components,INE726V01018,nifty_total_market.csv
+NSE:PRIVISCL-EQ,Privi Speciality Chemicals Ltd.,Chemicals,INE959A01019,nifty_total_market.csv
+NSE:PRSMJOHNSN-EQ,Prism Johnson Ltd.,Construction Materials,INE010A01011,nifty_total_market.csv
+NSE:PRUDENT-EQ,Prudent Corporate Advisory Services Ltd.,Financial Services,INE00F201020,nifty_total_market.csv
+NSE:PTC-EQ,PTC India Ltd.,Power,INE877F01012,nifty_total_market.csv
+NSE:PTCIL-EQ,PTC Industries Ltd.,Capital Goods,INE596F01018,nifty500.csv
+NSE:PURVA-EQ,Puravankara Ltd.,Realty,INE323I01011,nifty_total_market.csv
+NSE:PVRINOX-EQ,PVR INOX Ltd.,Media Entertainment & Publication,INE191H01014,nifty500.csv
+NSE:PWL-EQ,Physicswallah Ltd.,Consumer Services,INE0LP301011,nifty_total_market.csv
+NSE:QPOWER-EQ,Quality Power Electrical Equipments Ltd.,Capital Goods,INE0SII01026,nifty_total_market.csv
+NSE:QUESS-EQ,Quess Corp Ltd.,Services,INE615P01015,nifty_total_market.csv
+NSE:RADICO-EQ,Radico Khaitan Ltd,Fast Moving Consumer Goods,INE944F01028,nifty500.csv
+NSE:RAILTEL-EQ,Railtel Corporation Of India Ltd.,Telecommunication,INE0DD101019,nifty500.csv
+NSE:RAIN-EQ,Rain Industries Ltd,Chemicals,INE855B01025,nifty_total_market.csv
+NSE:RAINBOW-EQ,Rainbow Childrens Medicare Ltd.,Healthcare,INE961O01016,nifty500.csv
+NSE:RALLIS-EQ,Rallis India Ltd.,Chemicals,INE613A01020,nifty_total_market.csv
+NSE:RAMCOCEM-EQ,The Ramco Cements Ltd.,Construction Materials,INE331A01037,nifty500.csv
+NSE:RATEGAIN-EQ,Rategain Travel Technologies Ltd.,Information Technology,INE0CLI01024,nifty_total_market.csv
+NSE:RAYMONDLSL-EQ,Raymond Lifestyle Ltd.,Textiles,INE02ID01020,nifty_total_market.csv
+NSE:RBA-EQ,Restaurant Brands Asia Ltd.,Consumer Services,INE07T201019,nifty_total_market.csv
+NSE:RBLBANK-EQ,RBL Bank Ltd.,Financial Services,INE976G01028,nifty500.csv
+NSE:RCF-EQ,Rashtriya Chemicals & Fertilizers Ltd.,Chemicals,INE027A01015,nifty500.csv
+NSE:RECLTD-EQ,REC Ltd.,Financial Services,INE020B01018,nifty500.csv
+NSE:REDINGTON-EQ,Redington Ltd.,Services,INE891D01026,nifty500.csv
+NSE:REDTAPE-EQ,Redtape Ltd.,Consumer Durables,INE0LXT01019,nifty_total_market.csv
+NSE:REFEX-EQ,Refex Industries Ltd.,Chemicals,INE056I01025,nifty_total_market.csv
+NSE:RELAXO-EQ,Relaxo Footwears Ltd.,Consumer Durables,INE131B01039,nifty_total_market.csv
+NSE:RELIANCE-EQ,Reliance Industries Ltd.,Oil Gas & Consumable Fuels,INE002A01018,nifty500.csv
+NSE:RELIGARE-EQ,Religare Enterprises Ltd.,Financial Services,INE621H01010,nifty_total_market.csv
+NSE:RENUKA-EQ,Shree Renuka Sugars Ltd.,Fast Moving Consumer Goods,INE087H01022,nifty_total_market.csv
+NSE:RHIM-EQ,RHI MAGNESITA INDIA LTD.,Capital Goods,INE743M01012,nifty500.csv
+NSE:RITES-EQ,RITES Ltd.,Construction,INE320J01015,nifty500.csv
+NSE:RKFORGE-EQ,Ramkrishna Forgings Ltd.,Automobile and Auto Components,INE399G01023,nifty500.csv
+NSE:ROUTE-EQ,Route Mobile Ltd.,Telecommunication,INE450U01017,nifty_total_market.csv
+NSE:RPOWER-EQ,Reliance Power Ltd.,Power,INE614G01033,nifty500.csv
+NSE:RRKABEL-EQ,R R Kabel Ltd.,Capital Goods,INE777K01022,nifty500.csv
+NSE:RTNINDIA-EQ,RattanIndia Enterprises Ltd.,Consumer Services,INE834M01019,nifty_total_market.csv
+NSE:RTNPOWER-EQ,RattanIndia Power Ltd.,Power,INE399K01017,nifty_total_market.csv
+NSE:RUBICON-EQ,Rubicon Research Ltd.,Healthcare,INE506V01022,nifty_total_market.csv
+NSE:RVNL-EQ,Rail Vikas Nigam Ltd.,Construction,INE415G01027,nifty500.csv
+NSE:SAATVIKGL-EQ,Saatvik Green Energy Ltd.,Capital Goods,INE13B501022,nifty_total_market.csv
+NSE:SAFARI-EQ,Safari Industries (India) Ltd.,Consumer Durables,INE429E01023,nifty_total_market.csv
+NSE:SAGILITY-EQ,Sagility Ltd.,Information Technology,INE0W2G01015,nifty500.csv
+NSE:SAIL-EQ,Steel Authority of India Ltd.,Metals & Mining,INE114A01011,nifty500.csv
+NSE:SAILIFE-EQ,Sai Life Sciences Ltd.,Healthcare,INE570L01029,nifty500.csv
+NSE:SAMHI-EQ,Samhi Hotels Ltd.,Consumer Services,INE08U801020,nifty_total_market.csv
+NSE:SAMMAANCAP-EQ,Sammaan Capital Ltd.,Financial Services,INE148I01020,nifty500.csv
+NSE:SANDUMA-EQ,Sandur Manganese & Iron Ores Ltd.,Oil Gas & Consumable Fuels,INE149K01016,nifty_total_market.csv
+NSE:SANSERA-EQ,Sansera Engineering Ltd.,Automobile and Auto Components,INE953O01021,nifty_total_market.csv
+NSE:SAPPHIRE-EQ,Sapphire Foods India Ltd.,Consumer Services,INE806T01020,nifty500.csv
+NSE:SARDAEN-EQ,Sarda Energy and Minerals Ltd.,Metals & Mining,INE385C01021,nifty500.csv
+NSE:SAREGAMA-EQ,Saregama India Ltd,Media Entertainment & Publication,INE979A01025,nifty500.csv
+NSE:SBFC-EQ,SBFC Finance Ltd.,Financial Services,INE423Y01016,nifty500.csv
+NSE:SBICARD-EQ,SBI Cards and Payment Services Ltd.,Financial Services,INE018E01016,nifty500.csv
+NSE:SBILIFE-EQ,SBI Life Insurance Company Ltd.,Financial Services,INE123W01016,nifty500.csv
+NSE:SBIN-EQ,State Bank of India,Financial Services,INE062A01020,nifty500.csv
+NSE:SCHAEFFLER-EQ,Schaeffler India Ltd.,Automobile and Auto Components,INE513A01022,nifty500.csv
+NSE:SCHNEIDER-BE,Schneider Electric Infrastructure Ltd.,Capital Goods,INE839M01018,nifty_total_market.csv
+NSE:SCI-EQ,Shipping Corporation of India Ltd.,Services,INE109A01011,nifty500.csv
+NSE:SENCO-EQ,Senco Gold Ltd.,Consumer Durables,INE602W01027,nifty_total_market.csv
+NSE:SFL-EQ,Sheela Foam Ltd.,Consumer Durables,INE916U01025,nifty_total_market.csv
+NSE:SHAILY-EQ,Shaily Engineering Plastics Ltd.,Consumer Durables,INE151G01028,nifty_total_market.csv
+NSE:SHAKTIPUMP-EQ,Shakti Pumps (India) Ltd.,Capital Goods,INE908D01010,nifty_total_market.csv
+NSE:SHARDACROP-EQ,Sharda Cropchem Ltd.,Chemicals,INE221J01015,nifty_total_market.csv
+NSE:SHAREINDIA-EQ,Share India Securities Ltd.,Financial Services,INE932X01026,nifty_total_market.csv
+NSE:SHILPAMED-EQ,Shilpa Medicare Ltd.,Healthcare,INE790G01031,nifty_total_market.csv
+NSE:SHREECEM-EQ,Shree Cement Ltd.,Construction Materials,INE070A01015,nifty500.csv
+NSE:SHRIPISTON-EQ,Shriram Pistons & Rings Ltd.,Automobile and Auto Components,INE526E01018,nifty_total_market.csv
+NSE:SHRIRAMFIN-EQ,Shriram Finance Ltd.,Financial Services,INE721A01047,nifty500.csv
+NSE:SHYAMMETL-EQ,Shyam Metalics and Energy Ltd.,Capital Goods,INE810G01011,nifty500.csv
+NSE:SIEMENS-EQ,Siemens Ltd.,Capital Goods,INE003A01024,nifty500.csv
+NSE:SIGNATURE-EQ,Signatureglobal (India) Ltd.,Realty,INE903U01023,nifty500.csv
+NSE:SJVN-EQ,SJVN Ltd.,Power,INE002L01015,nifty500.csv
+NSE:SKFINDIA-EQ,SKF India Ltd.,Automobile and Auto Components,INE640A01023,nifty_total_market.csv
+NSE:SKFINDUS-EQ,SKF India (Industrial) Ltd.,Capital Goods,INE2J8701016,nifty_total_market.csv
+NSE:SKIPPER-EQ,Skipper Ltd.,Capital Goods,INE439E01022,nifty_total_market.csv
+NSE:SKYGOLD-EQ,SKY GOLD AND DIAMONDS Ltd.,Consumer Durables,INE01IU01018,nifty_total_market.csv
+NSE:SMARTWORKS-EQ,Smartworks Coworking Spaces Ltd.,Services,INE0NAZ01010,nifty_total_market.csv
+NSE:SMLMAH-EQ,SML Mahindra Ltd.,Capital Goods,INE294B01019,nifty_total_market.csv
+NSE:SOBHA-EQ,Sobha Ltd.,Realty,INE671H01015,nifty500.csv
+NSE:SOLARINDS-EQ,Solar Industries India Ltd.,Chemicals,INE343H01029,nifty500.csv
+NSE:SONACOMS-EQ,Sona BLW Precision Forgings Ltd.,Automobile and Auto Components,INE073K01018,nifty500.csv
+NSE:SONATSOFTW-EQ,Sonata Software Ltd.,Information Technology,INE269A01021,nifty500.csv
+NSE:SOUTHBANK-EQ,South Indian Bank Ltd.,Financial Services,INE683A01023,nifty_total_market.csv
+NSE:SPARC-EQ,Sun Pharma Advanced Research Company Ltd.,Healthcare,INE232I01014,nifty_total_market.csv
+NSE:SPLPETRO-EQ,Supreme Petrochem Ltd.,Chemicals,INE663A01033,nifty_total_market.csv
+NSE:SRF-EQ,SRF Ltd.,Chemicals,INE647A01010,nifty500.csv
+NSE:STAR-EQ,Strides Pharma Science Ltd.,Healthcare,INE939A01011,nifty_total_market.csv
+NSE:STARCEMENT-EQ,Star Cement Ltd.,Construction Materials,INE460H01021,nifty_total_market.csv
+NSE:STARHEALTH-EQ,Star Health and Allied Insurance Company Ltd.,Financial Services,INE575P01011,nifty500.csv
+NSE:STLTECH-EQ,Sterlite Technologies Ltd.,Telecommunication,INE089C01029,nifty_total_market.csv
+NSE:STYL-EQ,Seshaasai Technologies Ltd.,Financial Services,INE04VU01023,nifty_total_market.csv
+NSE:STYRENIX-EQ,Styrenix Performance Materials Ltd.,Chemicals,INE189B01011,nifty_total_market.csv
+NSE:SUBROS-EQ,Subros Ltd.,Capital Goods,INE287B01021,nifty_total_market.csv
+NSE:SUDARSCHEM-EQ,Sudarshan Chemical Industries Ltd.,Chemicals,INE659A01023,nifty_total_market.csv
+NSE:SUDEEPPHRM-EQ,Sudeep Pharma Ltd.,Healthcare,INE0QPI01025,nifty_total_market.csv
+NSE:SUMICHEM-EQ,Sumitomo Chemical India Ltd.,Chemicals,INE258G01013,nifty500.csv
+NSE:SUNDARMFIN-EQ,Sundaram Finance Ltd.,Financial Services,INE660A01013,nifty500.csv
+NSE:SUNDRMFAST-EQ,Sundram Fasteners Ltd.,Automobile and Auto Components,INE387A01021,nifty500.csv
+NSE:SUNPHARMA-EQ,Sun Pharmaceutical Industries Ltd.,Healthcare,INE044A01036,nifty500.csv
+NSE:SUNTECK-EQ,Sunteck Realty Ltd.,Realty,INE805D01034,nifty_total_market.csv
+NSE:SUNTV-EQ,Sun TV Network Ltd.,Media Entertainment & Publication,INE424H01027,nifty500.csv
+NSE:SUPREMEIND-EQ,Supreme Industries Ltd.,Capital Goods,INE195A01028,nifty500.csv
+NSE:SUPRIYA-EQ,Supriya Lifescience Ltd.,Healthcare,INE07RO01027,nifty_total_market.csv
+NSE:SURYAROSNI-EQ,Surya Roshni Ltd.,Capital Goods,INE335A01020,nifty_total_market.csv
+NSE:SUZLON-EQ,Suzlon Energy Ltd.,Capital Goods,INE040H01021,nifty500.csv
+NSE:SWANCORP-EQ,Swan Corp Ltd.,Chemicals,INE665A01038,nifty500.csv
+NSE:SWIGGY-EQ,Swiggy Ltd.,Consumer Services,INE00H001014,nifty500.csv
+NSE:SWSOLAR-EQ,Sterling and Wilson Renewable Energy Ltd.,Construction,INE00M201021,nifty_total_market.csv
+NSE:SYNGENE-EQ,Syngene International Ltd.,Healthcare,INE398R01022,nifty500.csv
+NSE:SYRMA-EQ,Syrma SGS Technology Ltd.,Capital Goods,INE0DYJ01015,nifty500.csv
+NSE:TANLA-EQ,Tanla Platforms Ltd.,Information Technology,INE483C01032,nifty_total_market.csv
+NSE:TARC-EQ,TARC Ltd.,Realty,INE0EK901012,nifty_total_market.csv
+NSE:TARIL-EQ,Transformers And Rectifiers (India) Ltd.,Capital Goods,INE763I01026,nifty500.csv
+NSE:TATACAP-EQ,Tata Capital Ltd.,Financial Services,INE976I01016,nifty_total_market.csv
+NSE:TATACHEM-EQ,Tata Chemicals Ltd.,Chemicals,INE092A01019,nifty500.csv
+NSE:TATACOMM-EQ,Tata Communications Ltd.,Telecommunication,INE151A01013,nifty500.csv
+NSE:TATACONSUM-EQ,Tata Consumer Products Ltd.,Fast Moving Consumer Goods,INE192A01025,nifty500.csv
+NSE:TATAELXSI-EQ,Tata Elxsi Ltd.,Information Technology,INE670A01012,nifty500.csv
+NSE:TATAINVEST-EQ,Tata Investment Corporation Ltd.,Financial Services,INE672A01026,nifty500.csv
+NSE:TATAPOWER-EQ,Tata Power Co. Ltd.,Power,INE245A01021,nifty500.csv
+NSE:TATASTEEL-EQ,Tata Steel Ltd.,Metals & Mining,INE081A01020,nifty500.csv
+NSE:TATATECH-EQ,Tata Technologies Ltd.,Information Technology,INE142M01025,nifty500.csv
+NSE:TBOTEK-EQ,TBO Tek Ltd.,Consumer Services,INE673O01025,nifty500.csv
+NSE:TCS-EQ,Tata Consultancy Services Ltd.,Information Technology,INE467B01029,nifty500.csv
+NSE:TDPOWERSYS-EQ,TD Power Systems Ltd.,Capital Goods,INE419M01027,nifty_total_market.csv
+NSE:TECHM-EQ,Tech Mahindra Ltd.,Information Technology,INE669C01036,nifty500.csv
+NSE:TECHNOE-EQ,Techno Electric & Engineering Company Ltd.,Construction,INE285K01026,nifty500.csv
+NSE:TEGA-EQ,Tega Industries Ltd.,Capital Goods,INE011K01018,nifty_total_market.csv
+NSE:TEJASNET-EQ,Tejas Networks Ltd.,Telecommunication,INE010J01012,nifty500.csv
+NSE:TENNIND-EQ,Tenneco Clean Air India Ltd.,Automobile and Auto Components,INE19RI01016,nifty_total_market.csv
+NSE:TEXRAIL-EQ,Texmaco Rail & Eng. Ltd.,Capital Goods,INE621L01012,nifty_total_market.csv
+NSE:THANGAMAYL-EQ,Thangamayil Jewellery Ltd.,Consumer Durables,INE085J01014,nifty_total_market.csv
+NSE:THELEELA-EQ,Leela Palaces Hotels & Resorts Ltd.,Consumer Services,INE0AQ201015,nifty500.csv
+NSE:THERMAX-EQ,Thermax Ltd.,Capital Goods,INE152A01029,nifty500.csv
+NSE:THOMASCOOK-EQ,Thomas Cook (India) Ltd.,Consumer Services,INE332A01027,nifty_total_market.csv
+NSE:THYROCARE-EQ,Thyrocare Technologies Ltd.,Healthcare,INE594H01019,nifty_total_market.csv
+NSE:TI-EQ,Tilaknagar Industries Ltd.,Fast Moving Consumer Goods,INE133E01013,nifty_total_market.csv
+NSE:TIINDIA-EQ,Tube Investments of India Ltd.,Automobile and Auto Components,INE974X01010,nifty500.csv
+NSE:TIMETECHNO-EQ,Time Technoplast Ltd.,Capital Goods,INE508G01029,nifty_total_market.csv
+NSE:TIMKEN-EQ,Timken India Ltd.,Capital Goods,INE325A01013,nifty500.csv
+NSE:TIPSMUSIC-EQ,Tips Music Ltd.,Media Entertainment & Publication,INE716B01029,nifty_total_market.csv
+NSE:TITAGARH-EQ,Titagarh Rail Systems Ltd.,Capital Goods,INE615H01020,nifty500.csv
+NSE:TITAN-EQ,Titan Company Ltd.,Consumer Durables,INE280A01028,nifty500.csv
+NSE:TMB-EQ,Tamilnad Mercantile Bank Ltd.,Financial Services,INE668A01016,nifty_total_market.csv
+NSE:TMCV-EQ,Tata Motors Ltd.,Capital Goods,INE1TAE01010,nifty_total_market.csv
+NSE:TMPV-EQ,Tata Motors Passenger Vehicles Ltd.,Automobile and Auto Components,INE155A01022,nifty500.csv
+NSE:TORNTPHARM-EQ,Torrent Pharmaceuticals Ltd.,Healthcare,INE685A01028,nifty500.csv
+NSE:TORNTPOWER-EQ,Torrent Power Ltd.,Power,INE813H01021,nifty500.csv
+NSE:TRANSRAILL-EQ,Transrail Lighting Ltd.,Capital Goods,INE454P01035,nifty_total_market.csv
+NSE:TRAVELFOOD-EQ,Travel Food Services Ltd.,Consumer Services,INE103V01028,nifty_total_market.csv
+NSE:TRENT-EQ,Trent Ltd.,Consumer Services,INE849A01020,nifty500.csv
+NSE:TRIDENT-EQ,Trident Ltd.,Textiles,INE064C01022,nifty500.csv
+NSE:TRITURBINE-EQ,Triveni Turbine Ltd.,Capital Goods,INE152M01016,nifty500.csv
+NSE:TRIVENI-EQ,Triveni Engineering & Industries Ltd.,Fast Moving Consumer Goods,INE256C01024,nifty500.csv
+NSE:TSFINV-EQ,TSF Investments Ltd.,Financial Services,INE202Z01029,nifty_total_market.csv
+NSE:TTML-EQ,Tata Teleservices (Maharashtra) Ltd.,Telecommunication,INE517B01013,nifty500.csv
+NSE:TVSMOTOR-EQ,TVS Motor Company Ltd.,Automobile and Auto Components,INE494B01023,nifty500.csv
+NSE:TVSSCS-BE,TVS Supply Chain Solutions Ltd.,Services,INE395N01027,nifty_total_market.csv
+NSE:UBL-EQ,United Breweries Ltd.,Fast Moving Consumer Goods,INE686F01025,nifty500.csv
+NSE:UCOBANK-EQ,UCO Bank,Financial Services,INE691A01018,nifty500.csv
+NSE:UJJIVANSFB-EQ,Ujjivan Small Finance Bank Ltd.,Financial Services,INE551W01018,nifty_total_market.csv
+NSE:ULTRACEMCO-EQ,UltraTech Cement Ltd.,Construction Materials,INE481G01011,nifty500.csv
+NSE:UNIONBANK-EQ,Union Bank of India,Financial Services,INE692A01016,nifty500.csv
+NSE:UNITDSPR-EQ,United Spirits Ltd.,Fast Moving Consumer Goods,INE854D01024,nifty500.csv
+NSE:UNOMINDA-EQ,UNO Minda Ltd.,Automobile and Auto Components,INE405E01023,nifty500.csv
+NSE:UPL-EQ,UPL Ltd.,Chemicals,INE628A01036,nifty500.csv
+NSE:URBANCO-EQ,Urban Company Ltd.,Consumer Services,INE0CAZ01013,nifty_total_market.csv
+NSE:USHAMART-EQ,Usha Martin Ltd.,Capital Goods,INE228A01035,nifty500.csv
+NSE:UTIAMC-EQ,UTI Asset Management Company Ltd.,Financial Services,INE094J01016,nifty500.csv
+NSE:UTLSOLAR-EQ,Fujiyama Power Systems Ltd.,Capital Goods,INE12UR01024,nifty_total_market.csv
+NSE:V2RETAIL-EQ,V2 Retail Ltd.,Consumer Services,INE945H01021,nifty_total_market.csv
+NSE:VAIBHAVGBL-EQ,Vaibhav Global Ltd.,Consumer Durables,INE884A01027,nifty_total_market.csv
+NSE:VARROC-EQ,Varroc Engineering Ltd.,Automobile and Auto Components,INE665L01035,nifty_total_market.csv
+NSE:VBL-EQ,Varun Beverages Ltd.,Fast Moving Consumer Goods,INE200M01039,nifty500.csv
+NSE:VEDL-EQ,Vedanta Ltd.,Metals & Mining,INE205A01025,nifty500.csv
+NSE:VENTIVE-EQ,Ventive Hospitality Ltd.,Consumer Services,INE781S01027,nifty500.csv
+NSE:VGUARD-EQ,V-Guard Industries Ltd.,Consumer Durables,INE951I01027,nifty500.csv
+NSE:VIJAYA-EQ,Vijaya Diagnostic Centre Ltd.,Healthcare,INE043W01024,nifty500.csv
+NSE:VIKRAMSOLR-EQ,Vikram Solar Ltd.,Capital Goods,INE078V01014,nifty_total_market.csv
+NSE:VIPIND-EQ,V.I.P. Industries Ltd.,Consumer Durables,INE054A01027,nifty_total_market.csv
+NSE:VIYASH-EQ,Viyash Scientific Ltd.,Healthcare,INE807F01027,nifty_total_market.csv
+NSE:VMART-EQ,V-Mart Retail Ltd.,Consumer Services,INE665J01013,nifty_total_market.csv
+NSE:VMM-EQ,Vishal Mega Mart Ltd.,Consumer Services,INE01EA01019,nifty500.csv
+NSE:VOLTAMP-EQ,Voltamp Transformers Ltd,Capital Goods,INE540H01012,nifty_total_market.csv
+NSE:VOLTAS-EQ,Voltas Ltd.,Consumer Durables,INE226A01021,nifty500.csv
+NSE:VTL-EQ,Vardhman Textiles Ltd.,Textiles,INE825A01020,nifty500.csv
+NSE:WAAREEENER-EQ,Waaree Energies Ltd.,Capital Goods,INE377N01017,nifty500.csv
+NSE:WAAREERTL-EQ,Waaree Renewable Technologies Ltd.,Capital Goods,INE299N01021,nifty_total_market.csv
+NSE:WABAG-EQ,Va Tech Wabag Ltd.,Utilities,INE956G01038,nifty_total_market.csv
+NSE:WAKEFIT-EQ,Wakefit Innovations Ltd.,Consumer Durables,INE0E7301029,nifty_total_market.csv
+NSE:WEBELSOLAR-EQ,Websol Energy System Ltd.,Capital Goods,INE855C01023,nifty_total_market.csv
+NSE:WELCORP-EQ,Welspun Corp Ltd.,Capital Goods,INE191B01025,nifty500.csv
+NSE:WELENT-EQ,Welspun Enterprises Ltd.,Construction,INE625G01013,nifty_total_market.csv
+NSE:WELSPUNLIV-EQ,Welspun Living Ltd.,Textiles,INE192B01031,nifty500.csv
+NSE:WESTLIFE-EQ,Westlife Foodworld Ltd.,Consumer Services,INE274F01020,nifty_total_market.csv
+NSE:WEWORK-EQ,WeWork India Management Ltd.,Services,INE085001019,nifty_total_market.csv
+NSE:WHIRLPOOL-EQ,Whirlpool of India Ltd.,Consumer Durables,INE716A01013,nifty500.csv
+NSE:WIPRO-EQ,Wipro Ltd.,Information Technology,INE075A01022,nifty500.csv
+NSE:WOCKPHARMA-EQ,Wockhardt Ltd.,Healthcare,INE049B01025,nifty500.csv
+NSE:YATHARTH-EQ,Yatharth Hospital & Trauma Care Services Ltd.,Healthcare,INE0JO301016,nifty_total_market.csv
+NSE:YESBANK-EQ,Yes Bank Ltd.,Financial Services,INE528G01035,nifty500.csv
+NSE:ZAGGLE-EQ,Zaggle Prepaid Ocean Services Ltd.,Information Technology,INE07K301024,nifty_total_market.csv
+NSE:ZEEL-EQ,Zee Entertainment Enterprises Ltd.,Media Entertainment & Publication,INE256A01028,nifty500.csv
+NSE:ZENSARTECH-EQ,Zensar Technolgies Ltd.,Information Technology,INE520A01027,nifty500.csv
+NSE:ZENTEC-EQ,Zen Technologies Ltd.,Capital Goods,INE251B01027,nifty500.csv
+NSE:ZFCVINDIA-EQ,ZF Commercial Vehicle Control Systems India Ltd.,Automobile and Auto Components,INE342J01019,nifty500.csv
+NSE:ZYDUSLIFE-EQ,Zydus Lifesciences Ltd.,Healthcare,INE010B01027,nifty500.csv
+NSE:ZYDUSWELL-EQ,Zydus Wellness Ltd.,Fast Moving Consumer Goods,INE768C01028,nifty_total_market.csv
