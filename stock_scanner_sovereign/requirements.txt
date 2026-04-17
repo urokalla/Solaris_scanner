@@ -10,6 +10,7 @@ uvicorn
 streamlit
 python-dotenv
 requests
+pymupdf
 yfinance==0.2.18
 pyarrow
 python-dateutil

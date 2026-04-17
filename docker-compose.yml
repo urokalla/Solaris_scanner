@@ -207,6 +207,10 @@ services:
       # Seconds between runs (default 3600 = 1 hour)
       - EVENTS_FETCH_INTERVAL_SEC=${EVENTS_FETCH_INTERVAL_SEC:-3600}
       - EVENTS_FETCH_DAYS=${EVENTS_FETCH_DAYS:-7}
+      # After each NSE fetch: PDF text → short summary JSON for /events (disable: NSE_ANNOUNCE_SUMMARY_ENABLED=0)
+      - NSE_ANNOUNCE_SUMMARY_ENABLED=${NSE_ANNOUNCE_SUMMARY_ENABLED:-1}
+      - NSE_ANNOUNCE_SUMMARY_MAX_NEW=${NSE_ANNOUNCE_SUMMARY_MAX_NEW:-10}
+      - NSE_ANNOUNCE_SUMMARY_SLEEP_SEC=${NSE_ANNOUNCE_SUMMARY_SLEEP_SEC:-0.35}
       # Screener EPS snapshot (prod): nightly window Asia/Kolkata equivalent via fixed +5:30
       - SCREENER_EPS_FETCH_ENABLED=${SCREENER_EPS_FETCH_ENABLED:-1}
       - SCREENER_EPS_IST_HOUR=${SCREENER_EPS_IST_HOUR:-20}

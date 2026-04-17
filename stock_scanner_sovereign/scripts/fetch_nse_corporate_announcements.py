@@ -6,6 +6,9 @@ Run manually or from cron — keeps the dashboard off NSE when Events reads the 
   python scripts/fetch_nse_corporate_announcements.py --days 7
 
 Writes: stock_scanner_sovereign/data/nse_corporate_announcements.csv
+
+Optional follow-up (cron loop): scripts/nse_announcement_summarize.py writes
+data/nse_corporate_announcement_summaries.json for dashboard summaries.
 """
 
 from __future__ import annotations
