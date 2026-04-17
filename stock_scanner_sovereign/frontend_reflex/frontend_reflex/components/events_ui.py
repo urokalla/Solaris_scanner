@@ -74,7 +74,6 @@ def events_grid() -> rx.Component:
         rx.table.column_header_cell("SYMBOL", color="white"),
         rx.table.column_header_cell("TIME", color="white"),
         rx.table.column_header_cell("SUBJECT", color="white"),
-        rx.table.column_header_cell("SUMMARY", color="white"),
         rx.table.column_header_cell("TAG", color="white"),
         rx.table.column_header_cell("PDF", color="white"),
     )
@@ -85,15 +84,6 @@ def events_grid() -> rx.Component:
                 rx.table.cell(r["symbol"], color="#FFB000"),
                 rx.table.cell(r["an_dt"], color="#D1D1D1"),
                 rx.table.cell(r["desc"], color="#D1D1D1"),
-                rx.table.cell(
-                    rx.text(
-                        rx.cond(r["summary"] != "", r["summary"], "—"),
-                        size="1",
-                        color="#B0BEC5",
-                        white_space="normal",
-                        max_width="520px",
-                    )
-                ),
                 rx.table.cell(rx.text(r["tag"], color=r["tag_color"])),
                 rx.table.cell(
                     rx.cond(

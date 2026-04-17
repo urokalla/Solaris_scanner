@@ -22,10 +22,10 @@ while true; do
   echo "${ts} fetch_nse_corporate_announcements.py start"
   python3 scripts/fetch_nse_corporate_announcements.py --days "${DAYS}" || echo "${ts} fetch exit $? (continuing)"
 
-  case "${NSE_ANNOUNCE_SUMMARY_ENABLED:-1}" in
+  case "${NSE_ANNOUNCE_SUMMARY_ENABLED:-0}" in
     0|false|FALSE|no|NO) ;;
     *)
-      MAXN="${NSE_ANNOUNCE_SUMMARY_MAX_NEW:-10}"
+      MAXN="${NSE_ANNOUNCE_SUMMARY_MAX_NEW:-50}"
       SSLP="${NSE_ANNOUNCE_SUMMARY_SLEEP_SEC:-0.35}"
       echo "${ts} nse_announcement_summarize.py start (max-new=${MAXN})"
       python3 scripts/nse_announcement_summarize.py --max-new "${MAXN}" --sleep-sec "${SSLP}" || echo "${ts} summarize exit $? (continuing)"

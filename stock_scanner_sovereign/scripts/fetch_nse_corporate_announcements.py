@@ -7,8 +7,8 @@ Run manually or from cron — keeps the dashboard off NSE when Events reads the 
 
 Writes: stock_scanner_sovereign/data/nse_corporate_announcements.csv
 
-Optional follow-up (cron loop): scripts/nse_announcement_summarize.py writes
-data/nse_corporate_announcement_summaries.json for dashboard summaries.
+Optional: scripts/nse_announcement_summarize.py can build
+data/nse_corporate_announcement_summaries.json (disabled in docker by default).
 """
 
 from __future__ import annotations

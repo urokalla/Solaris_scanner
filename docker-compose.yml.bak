@@ -86,11 +86,11 @@ services:
     env_file:
       - ./stock_scanner_sovereign/.env
     volumes:
-      - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
-      - ./fyers_data_pipeline/data/historical:/app/data/historical
+      - /home/udai/RS_PROJECT/stock_scanner_sovereign:/app/stock_scanner_sovereign
+      - /home/udai/RS_PROJECT/fyers_data_pipeline/data/historical:/app/data/historical
       # So scripts can import fyers_data_pipeline (e.g. backfill_missing_parquet.py)
       - ./fyers_data_pipeline:/app/fyers_data_pipeline:ro
-      - ./stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
+      - /home/udai/RS_PROJECT/stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
     environment:
       - SHM_MASTER=true
       - PYTHONUNBUFFERED=1
@@ -159,7 +159,7 @@ services:
       - ./stock_scanner_sovereign/.env
     volumes:
       - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
-      - ./fyers_data_pipeline/data/historical:/app/data/historical
+      - /home/udai/RS_PROJECT/fyers_data_pipeline/data/historical:/app/data/historical
     working_dir: /app/stock_scanner_sovereign/frontend_reflex
     environment:
       - SHM_MASTER=false
@@ -207,10 +207,6 @@ services:
       # Seconds between runs (default 3600 = 1 hour)
       - EVENTS_FETCH_INTERVAL_SEC=${EVENTS_FETCH_INTERVAL_SEC:-3600}
       - EVENTS_FETCH_DAYS=${EVENTS_FETCH_DAYS:-7}
-      # Optional: PDF → nse_corporate_announcement_summaries.json (Events UI no longer shows summaries)
-      - NSE_ANNOUNCE_SUMMARY_ENABLED=${NSE_ANNOUNCE_SUMMARY_ENABLED:-0}
-      - NSE_ANNOUNCE_SUMMARY_MAX_NEW=${NSE_ANNOUNCE_SUMMARY_MAX_NEW:-50}
-      - NSE_ANNOUNCE_SUMMARY_SLEEP_SEC=${NSE_ANNOUNCE_SUMMARY_SLEEP_SEC:-0.35}
       # Screener EPS snapshot (prod): nightly window Asia/Kolkata equivalent via fixed +5:30
       - SCREENER_EPS_FETCH_ENABLED=${SCREENER_EPS_FETCH_ENABLED:-1}
       - SCREENER_EPS_IST_HOUR=${SCREENER_EPS_IST_HOUR:-20}
@@ -219,7 +215,7 @@ services:
       - SCREENER_EPS_SLEEP_SEC=${SCREENER_EPS_SLEEP_SEC:-0.2}
     command: ["sh", "/app/stock_scanner_sovereign/scripts/docker_events_fetch_loop.sh"]
     cpus: "0.15"
-    mem_limit: 512m
+    mem_limit: 384m
     networks:
       - sovereign_net
 

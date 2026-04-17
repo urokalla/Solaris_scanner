@@ -1,8 +1,6 @@
 import asyncio
 import csv
 import datetime as dt
-import hashlib
-import json
 from pathlib import Path
 
 import reflex as rx
@@ -72,55 +70,6 @@ def _find_nse_corporate_announcements_csv() -> Path | None:
     return None
 
 
-_SUMMARY_JSON_PATH: str = ""
-_SUMMARY_JSON_MTIME: float = -1.0
-_SUMMARY_BY_KEY: dict[str, str] = {}
-
-
-def _announcement_row_key(symbol: str, an_dt: str, url: str) -> str:
-    raw = f"{(symbol or '').strip().upper()}|{(an_dt or '').strip()}|{(url or '').strip()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _load_announcement_summaries_next_to(snapshot_csv: Path | None) -> dict[str, str]:
-    """Load summaries JSON from the same directory as the announcements CSV we actually read."""
-    global _SUMMARY_JSON_PATH, _SUMMARY_JSON_MTIME, _SUMMARY_BY_KEY
-    if snapshot_csv is None:
-        _SUMMARY_JSON_PATH = ""
-        _SUMMARY_JSON_MTIME = -1.0
-        _SUMMARY_BY_KEY = {}
-        return {}
-    path = (snapshot_csv.parent / "nse_corporate_announcement_summaries.json").resolve()
-    if not path.exists():
-        _SUMMARY_JSON_PATH = ""
-        _SUMMARY_JSON_MTIME = -1.0
-        _SUMMARY_BY_KEY = {}
-        return {}
-    key = str(path)
-    try:
-        mtime = float(path.stat().st_mtime)
-    except OSError:
-        return _SUMMARY_BY_KEY
-    if key == _SUMMARY_JSON_PATH and mtime == _SUMMARY_JSON_MTIME and _SUMMARY_BY_KEY:
-        return _SUMMARY_BY_KEY
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        _SUMMARY_BY_KEY = {}
-        _SUMMARY_JSON_PATH = key
-        _SUMMARY_JSON_MTIME = mtime
-        return {}
-    out: dict[str, str] = {}
-    if isinstance(raw, dict):
-        for k, v in raw.items():
-            if isinstance(v, dict) and str(v.get("summary") or "").strip():
-                out[str(k)] = str(v.get("summary") or "").strip()
-    _SUMMARY_BY_KEY = out
-    _SUMMARY_JSON_PATH = key
-    _SUMMARY_JSON_MTIME = mtime
-    return out
-
-
 def _lower_key_row(row: dict) -> dict:
     return {str(k or "").strip().lower(): v for k, v in row.items()}
 
@@ -145,7 +94,6 @@ class EventsState(rx.State):
             for r in self.rows
             if q in str(r.get("symbol", "")).upper()
             or q in str(r.get("desc", "")).upper()
-            or q in str(r.get("summary", "")).upper()
         ]
 
     @rx.var
@@ -238,7 +186,6 @@ class EventsState(rx.State):
                     continue
                 snap_path = _find_nse_corporate_announcements_csv()
                 raw = self._load_announcements_snapshot(snap_path)
-                summaries = _load_announcement_summaries_next_to(snap_path)
                 rows: list[dict] = []
                 for x in raw:
                     sym = str(x.get("symbol") or "").upper()
@@ -246,15 +193,12 @@ class EventsState(rx.State):
                         continue
                     tag, color = self._tag(str(x.get("desc") or ""))
                     url = str(x.get("attchmntFile") or "")
-                    sk = _announcement_row_key(sym, str(x.get("an_dt") or ""), url)
-                    summ = summaries.get(sk, "")
                     rows.append(
                         {
                             "symbol": sym,
                             "desc": str(x.get("desc") or ""),
                             "an_dt": str(x.get("an_dt") or ""),
                             "attchmntFile": url,
-                            "summary": summ,
                             "tag": tag,
                             "tag_color": color,
                         }
