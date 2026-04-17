@@ -6,7 +6,7 @@ After fetch_nse_corporate_announcements.py runs, summarize new PDF attachments o
 - Extracts text with PyMuPDF
 - Writes extractive summary (no external LLM) into a JSON sidecar so the CSV can keep being overwritten
 
-Cache: stock_scanner_sovereign/data/nse_corporate_announcement_summaries.json
+Cache: ``<same folder as CSV>/nse_corporate_announcement_summaries.json`` (override with ``--cache``).
 
   python3 scripts/nse_announcement_summarize.py --max-new 10 --sleep-sec 0.5
 """
@@ -27,7 +27,7 @@ import requests
 
 NSE_HOME = "https://www.nseindia.com"
 DEFAULT_CSV = "data/nse_corporate_announcements.csv"
-DEFAULT_CACHE = "data/nse_corporate_announcement_summaries.json"
+# Default: JSON is written next to the CSV (same dir the dashboard reads).
 MAX_PDF_BYTES = 18 * 1024 * 1024
 
 
@@ -38,6 +38,11 @@ def _repo_root() -> Path:
 def row_key(symbol: str, an_dt: str, url: str) -> str:
     raw = f"{(symbol or '').strip().upper()}|{(an_dt or '').strip()}|{(url or '').strip()}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _looks_like_pdf_url(url: str) -> bool:
+    u = (url or "").strip().split("?", 1)[0].lower()
+    return u.endswith(".pdf")
 
 
 def _nse_session(timeout: int) -> requests.Session:
@@ -141,7 +146,11 @@ def _write_cache(path: Path, data: dict[str, Any]) -> None:
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--csv", default=DEFAULT_CSV, help="Relative to stock_scanner_sovereign")
-    p.add_argument("--cache", default=DEFAULT_CACHE, help="Relative to stock_scanner_sovereign")
+    p.add_argument(
+        "--cache",
+        default="",
+        help="Summaries JSON path relative to stock_scanner_sovereign (default: same folder as --csv)",
+    )
     p.add_argument("--max-new", type=int, default=10, help="Max new PDFs to process this run")
     p.add_argument("--sleep-sec", type=float, default=0.35, help="Pause between downloads")
     p.add_argument("--timeout", type=int, default=45)
@@ -149,7 +158,10 @@ def main() -> int:
 
     repo = _repo_root()
     csv_path = (repo / args.csv).resolve()
-    cache_path = (repo / args.cache).resolve()
+    if (args.cache or "").strip():
+        cache_path = (repo / args.cache.strip()).resolve()
+    else:
+        cache_path = (csv_path.parent / "nse_corporate_announcement_summaries.json").resolve()
     if not csv_path.exists():
         print(f"skip: csv missing {csv_path}", file=sys.stderr)
         return 0
@@ -162,13 +174,18 @@ def main() -> int:
         if done >= max(0, int(args.max_new)):
             break
         url = r["attchmntFile"]
-        if not url or not url.lower().endswith(".pdf"):
+        if not url or not _looks_like_pdf_url(url):
             continue
         k = row_key(r["symbol"], r["an_dt"], url)
-        if k in cache and isinstance(cache[k], dict) and cache[k].get("summary"):
+        if k in cache and isinstance(cache[k], dict) and str(cache[k].get("summary") or "").strip():
             continue
         try:
-            resp = session.get(url, timeout=args.timeout, stream=True)
+            resp = session.get(
+                url,
+                timeout=args.timeout,
+                stream=True,
+                headers={"Referer": f"{NSE_HOME}/"},
+            )
             resp.raise_for_status()
             clen = resp.headers.get("Content-Length")
             if clen and clen.isdigit() and int(clen) > MAX_PDF_BYTES:

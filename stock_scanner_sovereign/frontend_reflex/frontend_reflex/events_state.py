@@ -72,14 +72,6 @@ def _find_nse_corporate_announcements_csv() -> Path | None:
     return None
 
 
-def _find_nse_announcement_summaries_json() -> Path | None:
-    for base in _data_roots_for_snapshots():
-        p = (base / "nse_corporate_announcement_summaries.json").resolve()
-        if p.exists():
-            return p
-    return None
-
-
 _SUMMARY_JSON_PATH: str = ""
 _SUMMARY_JSON_MTIME: float = -1.0
 _SUMMARY_BY_KEY: dict[str, str] = {}
@@ -90,10 +82,16 @@ def _announcement_row_key(symbol: str, an_dt: str, url: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _load_announcement_summaries() -> dict[str, str]:
+def _load_announcement_summaries_next_to(snapshot_csv: Path | None) -> dict[str, str]:
+    """Load summaries JSON from the same directory as the announcements CSV we actually read."""
     global _SUMMARY_JSON_PATH, _SUMMARY_JSON_MTIME, _SUMMARY_BY_KEY
-    path = _find_nse_announcement_summaries_json()
-    if path is None:
+    if snapshot_csv is None:
+        _SUMMARY_JSON_PATH = ""
+        _SUMMARY_JSON_MTIME = -1.0
+        _SUMMARY_BY_KEY = {}
+        return {}
+    path = (snapshot_csv.parent / "nse_corporate_announcement_summaries.json").resolve()
+    if not path.exists():
         _SUMMARY_JSON_PATH = ""
         _SUMMARY_JSON_MTIME = -1.0
         _SUMMARY_BY_KEY = {}
@@ -115,7 +113,7 @@ def _load_announcement_summaries() -> dict[str, str]:
     out: dict[str, str] = {}
     if isinstance(raw, dict):
         for k, v in raw.items():
-            if isinstance(v, dict) and v.get("summary"):
+            if isinstance(v, dict) and str(v.get("summary") or "").strip():
                 out[str(k)] = str(v.get("summary") or "").strip()
     _SUMMARY_BY_KEY = out
     _SUMMARY_JSON_PATH = key
@@ -200,12 +198,12 @@ class EventsState(rx.State):
             return "NEUTRAL", "#B0BEC5"
         return "NEUTRAL", "#B0BEC5"
 
-    def _load_announcements_snapshot(self) -> list[dict]:
+    def _load_announcements_snapshot(self, snapshot_path: Path | None = None) -> list[dict]:
         """
         Read data/nse_corporate_announcements.csv only (no NSE from the running app).
         Refresh the file with scripts/fetch_nse_corporate_announcements.py or your own job.
         """
-        path = _find_nse_corporate_announcements_csv()
+        path = snapshot_path or _find_nse_corporate_announcements_csv()
         if path is None:
             raise FileNotFoundError(
                 "nse_corporate_announcements.csv not found under data/ — "
@@ -238,8 +236,9 @@ class EventsState(rx.State):
                         self.status_message = "⚠️ nifty500.csv not found"
                     await asyncio.sleep(180)
                     continue
-                raw = self._load_announcements_snapshot()
-                summaries = _load_announcement_summaries()
+                snap_path = _find_nse_corporate_announcements_csv()
+                raw = self._load_announcements_snapshot(snap_path)
+                summaries = _load_announcement_summaries_next_to(snap_path)
                 rows: list[dict] = []
                 for x in raw:
                     sym = str(x.get("symbol") or "").upper()

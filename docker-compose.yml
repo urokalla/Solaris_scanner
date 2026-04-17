@@ -219,7 +219,7 @@ services:
       - SCREENER_EPS_SLEEP_SEC=${SCREENER_EPS_SLEEP_SEC:-0.2}
     command: ["sh", "/app/stock_scanner_sovereign/scripts/docker_events_fetch_loop.sh"]
     cpus: "0.15"
-    mem_limit: 384m
+    mem_limit: 512m
     networks:
       - sovereign_net
 
