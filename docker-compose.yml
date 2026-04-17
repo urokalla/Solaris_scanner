@@ -86,11 +86,11 @@ services:
     env_file:
       - ./stock_scanner_sovereign/.env
     volumes:
-      - /home/udai/RS_PROJECT/stock_scanner_sovereign:/app/stock_scanner_sovereign
-      - /home/udai/RS_PROJECT/fyers_data_pipeline/data/historical:/app/data/historical
+      - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
+      - ./fyers_data_pipeline/data/historical:/app/data/historical
       # So scripts can import fyers_data_pipeline (e.g. backfill_missing_parquet.py)
       - ./fyers_data_pipeline:/app/fyers_data_pipeline:ro
-      - /home/udai/RS_PROJECT/stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
+      - ./stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
     environment:
       - SHM_MASTER=true
       - PYTHONUNBUFFERED=1
@@ -159,7 +159,7 @@ services:
       - ./stock_scanner_sovereign/.env
     volumes:
       - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
-      - /home/udai/RS_PROJECT/fyers_data_pipeline/data/historical:/app/data/historical
+      - ./fyers_data_pipeline/data/historical:/app/data/historical
     working_dir: /app/stock_scanner_sovereign/frontend_reflex
     environment:
       - SHM_MASTER=false
