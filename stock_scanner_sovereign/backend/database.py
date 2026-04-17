@@ -37,6 +37,7 @@ class DatabaseManager:
     _pool = None
     _brk_lvl_column_checked = False
     _mrs_prev_day_column_checked = False
+    _rs_prev_day_column_checked = False
     _w_rsi2_column_checked = False
 
     def __init__(self):
@@ -299,6 +300,51 @@ class DatabaseManager:
             logger.warning("Database: get_mrs_prev_day_map failed: %s", e)
             return {}
 
+    def ensure_rs_prev_day_column(self):
+        """Prior session end-of-day RS rating snapshot for RT delta on the main grid."""
+        if DatabaseManager._rs_prev_day_column_checked:
+            return
+        try:
+            self.ensure_live_state_table()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'live_state' AND column_name = 'rs_prev_day'
+                        """
+                    )
+                    if cur.fetchone() is None:
+                        cur.execute("ALTER TABLE live_state ADD COLUMN rs_prev_day INTEGER")
+                        conn.commit()
+                        logger.info("Database: added live_state.rs_prev_day")
+            DatabaseManager._rs_prev_day_column_checked = True
+        except Exception as e:
+            logger.warning("Database: ensure_rs_prev_day_column: %s", e)
+
+    def get_rs_prev_day_map(self, symbols):
+        """Return {symbol: rs_prev_day} for RT delta (today RS - prior EOD RS)."""
+        if not symbols:
+            return {}
+        self.ensure_rs_prev_day_column()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT symbol, rs_prev_day FROM live_state WHERE symbol IN %s AND rs_prev_day IS NOT NULL",
+                        (tuple(symbols),),
+                    )
+                    out = {}
+                    for r in cur.fetchall():
+                        try:
+                            out[r[0]] = int(r[1])
+                        except (TypeError, ValueError):
+                            continue
+                    return out
+        except Exception as e:
+            logger.warning("Database: get_rs_prev_day_map failed: %s", e)
+            return {}
+
     def ensure_w_rsi2_column(self):
         """Weekly RSI(2) on dashboard (master backfill from Parquet + LTP blend)."""
         if DatabaseManager._w_rsi2_column_checked:
@@ -390,6 +436,20 @@ class DatabaseManager:
                 logger.info("Database: EOD snapshot mrs_prev_day <- mrs (%s rows)", n)
         except Exception as e:
             logger.error("Database: snapshot_mrs_prev_day_from_current_mrs failed: %s", e, exc_info=True)
+
+    def snapshot_rs_prev_day_from_current_rs(self):
+        """EOD: copy current RS rating into rs_prev_day for next session RT delta."""
+        self.ensure_rs_prev_day_column()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    acquire_live_state_xact_lock(cur)
+                    cur.execute("UPDATE live_state SET rs_prev_day = rs_rating WHERE rs_rating IS NOT NULL")
+                    n = cur.rowcount
+                    conn.commit()
+                logger.info("Database: EOD snapshot rs_prev_day <- rs_rating (%s rows)", n)
+        except Exception as e:
+            logger.error("Database: snapshot_rs_prev_day_from_current_rs failed: %s", e, exc_info=True)
 
     _pre_thrust_table_checked = False
 

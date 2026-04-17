@@ -32,19 +32,22 @@ def _col_style(width: str, ellipsis: bool = True) -> dict:
 
 # Fixed widths for every column (table-layout:fixed). Percentages sum to 100% so no stray “air” in one column.
 _COL = {
-    "ticker": _col_style("20%"),
+    "ticker": _col_style("17%"),
     "price": _col_style("7%"),
     "chg": _col_style("5%"),
     "rt": _col_style("5%"),
+    "rtd": _col_style("5%"),
     "wmrs": _col_style("6%"),
     "prev": _col_style("6%"),
     "dmrs": _col_style("6%"),
     "rvol": _col_style("6%"),
     "wrsi2": _col_style("6%"),
+    "ad": _col_style("5%"),
+    "cs": _col_style("7%"),
     "brk": _col_style("5%"),
     "prf": _col_style("5%"),
     "rcvr": _col_style("4%"),
-    "status": _col_style("13%"),
+    "status": _col_style("12%"),
 }
 
 
@@ -106,11 +109,14 @@ def data_grid():
                 rx.select(
                     [
                         "RS",
+                        "RT Δ",
                         "W_mRS",
                         "Prev W_mRS",
                         "D_mRS",
                         "RVOL",
                         "W_RSI2",
+                        "A/D",
+                        "CS",
                         "CHG%",
                         "LTP",
                         "Ticker",
@@ -235,6 +241,18 @@ def data_grid():
                     ),
                     rx.table.column_header_cell(
                         rx.hstack(
+                            rx.text("RT Δ", color="white"),
+                            rx.text(State.grid_sort_arrow_rs_delta, color="#FFB000", font_size="9px"),
+                            spacing="1",
+                            align_items="center",
+                            cursor="pointer",
+                            on_click=lambda: State.toggle_grid_sort("rs_delta"),
+                        ),
+                        **_TH,
+                        **_COL["rtd"],
+                    ),
+                    rx.table.column_header_cell(
+                        rx.hstack(
                             rx.text("W_mRS", color="white"),
                             rx.text(State.grid_sort_arrow_mrs, color="#FFB000", font_size="9px"),
                             spacing="1",
@@ -292,6 +310,30 @@ def data_grid():
                         ),
                         **_TH,
                         **_COL["wrsi2"],
+                    ),
+                    rx.table.column_header_cell(
+                        rx.hstack(
+                            rx.text("A/D", color="white"),
+                            rx.text(State.grid_sort_arrow_ad, color="#FFB000", font_size="9px"),
+                            spacing="1",
+                            align_items="center",
+                            cursor="pointer",
+                            on_click=lambda: State.toggle_grid_sort("ad_grade"),
+                        ),
+                        **_TH,
+                        **_COL["ad"],
+                    ),
+                    rx.table.column_header_cell(
+                        rx.hstack(
+                            rx.text("CS", color="white"),
+                            rx.text(State.grid_sort_arrow_canslim, color="#FFB000", font_size="9px"),
+                            spacing="1",
+                            align_items="center",
+                            cursor="pointer",
+                            on_click=lambda: State.toggle_grid_sort("canslim_score"),
+                        ),
+                        **_TH,
+                        **_COL["cs"],
                     ),
                     rx.table.column_header_cell(
                         rx.hstack(
@@ -360,6 +402,31 @@ def data_grid():
                                     _hover={"text_decoration": "underline"},
                                     on_click=State.open_screener_in(r["symbol"]),
                                 ),
+                                rx.cond(
+                                    r["ann_has"],
+                                    rx.text(
+                                        "an",
+                                        font_size="9px",
+                                        color="#7CFC00",
+                                        font_weight="bold",
+                                        cursor="pointer",
+                                        flex_shrink="0",
+                                        title=r["ann_dt"],
+                                        _hover={"text_decoration": "underline"},
+                                        on_click=State.announcement_snapshot_alert(
+                                            r["symbol"], r["ann_dt"], r["ann_desc"]
+                                        ),
+                                    ),
+                                    rx.text(
+                                        "an",
+                                        font_size="9px",
+                                        color="#555555",
+                                        font_weight="normal",
+                                        cursor="default",
+                                        flex_shrink="0",
+                                        title="No recent announcement",
+                                    ),
+                                ),
                                 rx.text(
                                     "i",
                                     font_size="9px",
@@ -423,6 +490,19 @@ def data_grid():
                             **_COL["rt"],
                         ),
                         rx.table.cell(
+                            rx.text(
+                                r["rs_delta_str"],
+                                color=rx.cond(
+                                    r["rs_delta_up"],
+                                    "#00FF00",
+                                    rx.cond(r["rs_delta_down"], "#FF3131", "#D1D1D1"),
+                                ),
+                                title="RS change vs prior EOD snapshot",
+                            ),
+                            **_TD,
+                            **_COL["rtd"],
+                        ),
+                        rx.table.cell(
                             rx.text(r["mrs_str"], color=rx.cond(r["mrs_up"], "#00FF00", "#FF3131"), title=r["mrs_str"]),
                             **_TD,
                             **_COL["wmrs"],
@@ -454,6 +534,52 @@ def data_grid():
                             ),
                             **_TD,
                             **_COL["wrsi2"],
+                        ),
+                        rx.table.cell(
+                            rx.text(
+                                r["ad_grade"],
+                                color=rx.cond(
+                                    r["ad_grade"] == "A",
+                                    "#00FF00",
+                                    rx.cond(
+                                        r["ad_grade"] == "B",
+                                        "#7CFC00",
+                                        rx.cond(
+                                            r["ad_grade"] == "C",
+                                            "#D1D1D1",
+                                            rx.cond(r["ad_grade"] == "D", "#FF8A80", "#FF3131"),
+                                        ),
+                                    ),
+                                ),
+                                title=f"A/D grade ({r['ad_grade']})",
+                            ),
+                            **_TD,
+                            **_COL["ad"],
+                        ),
+                        rx.table.cell(
+                            rx.text(
+                                r["canslim_cell"],
+                                font_size="10px",
+                                color=rx.cond(
+                                    r["canslim_band"] == "strong",
+                                    "#00FF00",
+                                    rx.cond(
+                                        r["canslim_band"] == "good",
+                                        "#7CFC00",
+                                        rx.cond(
+                                            r["canslim_band"] == "track",
+                                            "#FFB000",
+                                            "#888888",
+                                        ),
+                                    ),
+                                ),
+                                title=r["canslim_tip"],
+                                overflow="hidden",
+                                text_overflow="ellipsis",
+                                white_space="nowrap",
+                            ),
+                            **_TD,
+                            **_COL["cs"],
                         ),
                         rx.table.cell(
                             rx.text(r["brk_lvl_str"], title=r["brk_lvl_str"]),

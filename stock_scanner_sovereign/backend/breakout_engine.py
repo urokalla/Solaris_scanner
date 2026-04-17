@@ -123,7 +123,8 @@ class BreakoutScanner:
         self.shm.setup(is_master_hint=False)
         self.arr = self.shm.arr
         self.sym_to_idx = self.shm.idx_map
-        self.lock, self.is_scanning, self.params = threading.Lock(), False, {}
+        # RLock: guarded `get` + `update` patterns may nest in the same thread during refactors.
+        self.lock, self.is_scanning, self.params = threading.RLock(), False, {}
         try:
             self.db.ensure_live_state_brk_column()
         except Exception:
@@ -283,6 +284,14 @@ class BreakoutScanner:
             data.sort(key=lambda x: float(x.get("ltp", 0) or 0), reverse=sort_desc)
         elif sort_key in ("brk", "brklvl", "brk_lvl"):
             data.sort(key=_brk_sort_val, reverse=sort_desc)
+        elif sort_key in ("tf", "dual_tf", "tf_ema", "ema_tf"):
+            data.sort(
+                key=lambda x: (
+                    int(x.get("dual_tf_stack_score", 0)),
+                    1 if x.get("dual_tf_ema_stack_ok") else 0,
+                ),
+                reverse=sort_desc,
+            )
         elif sort_key in ("status", "stage"):
             data.sort(key=lambda x: str(x.get("status", "") or "").lower(), reverse=sort_desc)
         elif sort_key in ("mrs_grid", "mrs_grid_status", "grid_mrs"):

@@ -1,7 +1,8 @@
-import time, threading, ssl, os, logging, traceback, json, re
+import time, threading, ssl, os, logging, traceback, json, re, csv, datetime as dt
 from typing import Optional
 import logging.handlers
 import numpy as np
+from pathlib import Path
 from fyers_apiv3.FyersWebsocket import data_ws
 from fyers_apiv3 import fyersModel
 from backend.database import DatabaseManager, _is_deadlock_exception, acquire_live_state_xact_lock
@@ -29,6 +30,17 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("MasterScanner")
+
+
+def _dashboard_sym_key(sym: str) -> str:
+    """Normalize `NSE:FOO-EQ`-style symbols to match `screener_eps_snapshot.csv` / A/D CSV keys."""
+    t = str(sym or "").upper().strip()
+    if ":" in t:
+        t = t.split(":", 1)[1]
+    t = t.replace("-INDEX", "")
+    if "-" in t:
+        t = t.rsplit("-", 1)[0]
+    return re.sub(r"[^A-Z0-9]", "", t)
 
 
 def _patch_fyers_ws_safe_send():
@@ -129,9 +141,10 @@ class MasterScanner:
         try:
             self.db.ensure_live_state_brk_column()
             self.db.ensure_mrs_prev_day_column()
+            self.db.ensure_rs_prev_day_column()
             self.db.ensure_w_rsi2_column()
         except Exception as e:
-            logger.warning("ensure_live_state_brk_column / mrs_prev_day / w_rsi2: %s", e)
+            logger.warning("ensure_live_state_brk_column / mrs_prev_day / rs_prev_day / w_rsi2: %s", e)
         is_master = os.getenv("SHM_MASTER", "true").lower() == "true"
         self.shm.setup(is_master_hint=is_master)
         
@@ -213,6 +226,25 @@ class MasterScanner:
         self._w_rsi2_ts: float = 0.0
         self._w_rsi2_thread: Optional[threading.Thread] = None
         self._pipeline_bridge = None
+        # A/D snapshot cache (offline script output: data/ad_proxy_snapshot.csv)
+        self._ad_cache_ts: float = 0.0
+        self._ad_cache_mtime: float = 0.0
+        self._ad_map: dict[str, tuple[str, float]] = {}
+        self._eps_ca_cache_ts: float = 0.0
+        self._eps_ca_cache_mtime: float = 0.0
+        # Screener nk -> (C quarterly YoY pass, A annual YoY pass)
+        self._eps_ca_map: dict[str, tuple[bool, bool]] = {}
+        self._ann_cache_ts: float = 0.0
+        self._ann_cache_mtime: float = 0.0
+        self._ann_map: dict[str, tuple[str, str]] = {}
+        # Short-lived UI DB merge cache (avoids repeated identical live_state queries every poll).
+        self._ui_db_cache_ttl_sec: float = max(1.0, float(os.getenv("UI_DB_CACHE_TTL_SEC", "5")))
+        self._ui_db_cache = {
+            "brk": {"ts": 0.0, "key": None, "val": {}},
+            "mrs_prev": {"ts": 0.0, "key": None, "val": {}},
+            "rs_prev": {"ts": 0.0, "key": None, "val": {}},
+            "w_rsi2": {"ts": 0.0, "key": None, "val": {}},
+        }
         # Per-symbol stale resub cooldown to avoid hammering the same illiquid names.
         self._stale_resub_sym_ts: dict[str, float] = {}
         # Last successful full WS subscribe list (Fyers SDK clears symbol_token on reconnect without resubscribing).
@@ -226,6 +258,11 @@ class MasterScanner:
         )
         self._invalid_ws_symbols: set[str] = set()
         self._load_invalid_ws_symbols()
+        # Slave dashboard: baseline runs in a daemon thread. If that thread exits, engine.get_scanner()
+        # respawns MasterScanner with empty math — only file-based merges (e.g. A/D) would work.
+        self._slave_math_ready = threading.Event()
+        if is_master:
+            self._slave_math_ready.set()
 
     def _normalize_ws_symbol(self, s: str) -> str:
         x = str(s or "").strip().upper()
@@ -622,6 +659,7 @@ class MasterScanner:
             return
         try:
             self.db.snapshot_mrs_prev_day_from_current_mrs()
+            self.db.snapshot_rs_prev_day_from_current_rs()
             self._eod_snapshot_done_date = d
         except Exception:
             pass
@@ -632,6 +670,175 @@ class MasterScanner:
 
             self._pipeline_bridge = PipelineBridge()
         return self._pipeline_bridge
+
+    def _get_ad_snapshot_map(self) -> dict[str, tuple[str, float]]:
+        """
+        Load cached A/D snapshot map from data/ad_proxy_snapshot.csv.
+        Returns: symbol -> (grade, ratio)
+        """
+        now = time.time()
+        if (now - self._ad_cache_ts) < 30.0 and self._ad_map:
+            return self._ad_map
+        self._ad_cache_ts = now
+
+        try:
+            root = Path(__file__).resolve()
+            candidates = [root.parents[2] / "data", root.parents[1] / "data"]
+            csv_path = None
+            for base in candidates:
+                p = (base / "ad_proxy_snapshot.csv").resolve()
+                if p.exists():
+                    csv_path = p
+                    break
+            if csv_path is None:
+                return self._ad_map
+
+            mtime = float(csv_path.stat().st_mtime)
+            if self._ad_map and mtime == self._ad_cache_mtime:
+                return self._ad_map
+            self._ad_cache_mtime = mtime
+
+            out: dict[str, tuple[str, float]] = {}
+            with csv_path.open("r", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    sym = str(row.get("symbol") or "").strip()
+                    if not sym:
+                        continue
+                    g = str(row.get("ad_grade") or "").strip().upper()
+                    if g not in ("A", "B", "C", "D", "E"):
+                        g = "—"
+                    try:
+                        r = float(str(row.get("ad_ratio") or "0").strip())
+                    except ValueError:
+                        r = 0.0
+                    out[sym] = (g, r)
+            self._ad_map = out
+            return self._ad_map
+        except Exception as ex:
+            logger.debug("A/D snapshot load skipped: %s", ex)
+            return self._ad_map
+
+    @staticmethod
+    def _parse_screener_yoy_pct(raw) -> Optional[float]:
+        if raw is None or str(raw).strip() == "":
+            return None
+        try:
+            v = float(str(raw).strip())
+        except ValueError:
+            return None
+        return v if np.isfinite(v) else None
+
+    def _get_screener_eps_canslim_ca_map(self) -> dict[str, tuple[bool, bool]]:
+        """
+        CANSLIM **C** (current quarter EPS YoY) and **A** (annual EPS YoY) as separate gates
+        from `data/screener_eps_snapshot.csv`. No OR shortcut: each must meet the threshold on
+        its own field when `fetch_status == ok`.
+        """
+        now = time.time()
+        if (now - self._eps_ca_cache_ts) < 30.0 and self._eps_ca_map:
+            return self._eps_ca_map
+        self._eps_ca_cache_ts = now
+        thr = float(os.getenv("CANSLIM_EPS_YOY_MIN", "25"))
+        try:
+            root = Path(__file__).resolve()
+            candidates = [root.parents[2] / "data", root.parents[1] / "data"]
+            csv_path = None
+            for base in candidates:
+                p = (base / "screener_eps_snapshot.csv").resolve()
+                if p.exists():
+                    csv_path = p
+                    break
+            if csv_path is None:
+                return self._eps_ca_map
+
+            mtime = float(csv_path.stat().st_mtime)
+            if self._eps_ca_map and mtime == self._eps_ca_cache_mtime:
+                return self._eps_ca_map
+            self._eps_ca_cache_mtime = mtime
+
+            out: dict[str, tuple[bool, bool]] = {}
+            with csv_path.open("r", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    nk = _dashboard_sym_key(str(row.get("symbol") or ""))
+                    if not nk:
+                        continue
+                    if str(row.get("fetch_status") or "").strip().lower() != "ok":
+                        out[nk] = (False, False)
+                        continue
+                    qv = self._parse_screener_yoy_pct(row.get("q_eps_yoy_pct"))
+                    av = self._parse_screener_yoy_pct(row.get("a_eps_yoy_pct"))
+                    c_ok = qv is not None and qv >= thr
+                    a_ok = av is not None and av >= thr
+                    out[nk] = (c_ok, a_ok)
+            self._eps_ca_map = out
+            return self._eps_ca_map
+        except Exception as ex:
+            logger.debug("EPS CANSLIM snapshot load skipped: %s", ex)
+            return self._eps_ca_map
+
+    def _get_recent_announcements_map(self) -> dict[str, tuple[str, str]]:
+        """
+        Load announcements CSV and keep only recent rows for quick main-grid action flag.
+        Returns: symbol -> (an_dt, desc)
+        """
+        now = time.time()
+        if (now - self._ann_cache_ts) < 30.0 and self._ann_map:
+            return self._ann_map
+        self._ann_cache_ts = now
+        try:
+            root = Path(__file__).resolve()
+            candidates = [root.parents[2] / "data", root.parents[1] / "data"]
+            csv_path = None
+            for base in candidates:
+                p = (base / "nse_corporate_announcements.csv").resolve()
+                if p.exists():
+                    csv_path = p
+                    break
+            if csv_path is None:
+                return self._ann_map
+            mtime = float(csv_path.stat().st_mtime)
+            if self._ann_map and mtime == self._ann_cache_mtime:
+                return self._ann_map
+            self._ann_cache_mtime = mtime
+
+            def _pdt(s: str) -> dt.datetime:
+                x = (s or "").strip()
+                if not x:
+                    return dt.datetime.min
+                for fmt in (
+                    "%d-%b-%Y %H:%M:%S",
+                    "%d-%b-%Y %H:%M",
+                    "%d-%b-%Y",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y-%m-%d",
+                ):
+                    try:
+                        return dt.datetime.strptime(x, fmt)
+                    except ValueError:
+                        pass
+                return dt.datetime.min
+
+            cutoff = dt.datetime.now() - dt.timedelta(days=3)
+            out: dict[str, tuple[str, str]] = {}
+            with csv_path.open("r", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    sym = str(row.get("symbol") or "").strip().upper()
+                    if not sym:
+                        continue
+                    an_dt = str(row.get("an_dt") or "").strip()
+                    desc = str(row.get("desc") or "").strip()
+                    when = _pdt(an_dt)
+                    if when < cutoff:
+                        continue
+                    prev = out.get(sym)
+                    if prev is None or _pdt(prev[0]) < when:
+                        out[sym] = (an_dt, desc)
+            self._ann_map = out
+            return self._ann_map
+        except Exception as ex:
+            logger.debug("Announcement map load skipped: %s", ex)
+            return self._ann_map
 
     def _maybe_refresh_w_rsi2_background(self):
         from config.settings import settings
@@ -873,8 +1080,16 @@ class MasterScanner:
         
         if not is_master:
             logger.info("📡 [Scanner] Slave Mode (Reader): Synchronizing Math Baseline for Dashboard.")
-            self.math.load_historical_baseline()
-            return
+            try:
+                hist_root = os.getenv("PIPELINE_DATA_DIR", "/app/data/historical")
+                self.math.load_historical_baseline(data_root=hist_root)
+            except Exception as ex:
+                logger.warning("Slave baseline load failed — CANSLIM L/M/N need Parquet at PIPELINE_DATA_DIR: %s", ex)
+            finally:
+                self._slave_math_ready.set()
+            # Keep daemon thread alive so frontend engine does not create a fresh empty scanner every poll.
+            while True:
+                time.sleep(3600.0)
 
         # 2. Token Acquisition: Required for Master WebSocket
         if not token:
@@ -897,6 +1112,8 @@ class MasterScanner:
         try:
             filters = filters or {}
             logger.debug("📊 UI Request -> Page: %s, Size: %s, Filters: %s", page, page_size, filters)
+            if not self._slave_math_ready.is_set():
+                self._slave_math_ready.wait(timeout=180.0)
 
             # Step 1: Universal Load (Trust the Index Map before filtering)
             valid_symbols = set(self.symbols)
@@ -975,6 +1192,11 @@ class MasterScanner:
             mrs_min_f = str(filters.get("mrs_min", "ALL")).upper()
             rv_min_f = str(filters.get("rv_min", "ALL")).upper()
             n_sym = len(self.symbols)
+            # Pull numpy views once per request; avoid repeated getattr inside the tight row loop.
+            _s4 = getattr(self.math, "mrs_w_slope_4w", None)
+            _ms = getattr(self.math, "mrs_mansfield_slope", None)
+            _rc = getattr(self.math, "mrs_w_belowzero_rising", None)
+            _rc_l = getattr(self.math, "mrs_w_belowzero_rising_latched", None)
             for i in range(min(n_sym, len(self.shm.arr))):
                 sym = self.symbols[i]
                 if sym not in valid_symbols:
@@ -1021,10 +1243,6 @@ class MasterScanner:
                 ch_pct = float(r["change_pct"])
                 if not np.isfinite(ch_pct):
                     ch_pct = 0.0
-                _s4 = getattr(self.math, "mrs_w_slope_4w", None)
-                _ms = getattr(self.math, "mrs_mansfield_slope", None)
-                _rc = getattr(self.math, "mrs_w_belowzero_rising", None)
-                _rc_l = getattr(self.math, "mrs_w_belowzero_rising_latched", None)
                 slope4 = float(_s4[i]) if _s4 is not None and i < len(_s4) else 0.0
                 m_slope = float(_ms[i]) if _ms is not None and i < len(_ms) else 0.0
                 if _rc_l is not None and i < len(_rc_l):
@@ -1035,6 +1253,7 @@ class MasterScanner:
                     "symbol": sym,
                     "ltp": float(r['ltp']),
                     "p1d": f"{ch_pct:.2f}%",
+                    "ch_pct": ch_pct,
                     "chg_up": ch_pct > 0,
                     "chg_down": ch_pct < 0,
                     "mrs": mrs_v,
@@ -1045,6 +1264,11 @@ class MasterScanner:
                     "mrs_daily_str": f"{r['mrs_daily']:+.2f}",
                     "mrs_daily_up": bool(r['mrs_daily'] >= 0),
                     "rs_rating": int(r['rs_rating']),
+                    "rs_prev_day": None,
+                    "rs_delta": None,
+                    "rs_delta_str": "—",
+                    "rs_delta_up": False,
+                    "rs_delta_down": False,
                     "status": st,
                     "profile": pf if pf.strip() else "—",
                     "rv": f"{rv_v:.2f}x",
@@ -1058,16 +1282,50 @@ class MasterScanner:
                     "mrs_mansfield_slope": m_slope,
                     "mrs_rcvr": mrs_rcvr,
                     "mrs_rcvr_str": "↑<0" if mrs_rcvr else "—",
+                    "ad_grade": "—",
+                    "ad_ratio": 0.0,
+                    "ann_has": False,
+                    "ann_dt": "",
+                    "ann_desc": "",
+                    "canslim_score": 0,
+                    "canslim_str": "0/6",
+                    "canslim_icon": "○",
+                    "canslim_tier": "Weak",
+                    "canslim_cell": "○ 0/6 · Weak",
+                    "canslim_band": "weak",
+                    "canslim_tip": "",
                 })
 
             rcvr_f = str(filters.get("mrs_rcvr", "ALL")).strip().upper()
             if rcvr_f in ("YES", "1", "TRUE", "ON", "BELOW0", "BELOW0_RISING"):
                 data = [d for d in data if d.get("mrs_rcvr")]
 
+            # Stable key for short-lived live_state merge caches across identical polls.
+            syms = [d["symbol"] for d in data]
+            cache_key = tuple(syms)
+            now_ts = time.time()
+
+            def _ui_cache_get(name: str):
+                e = self._ui_db_cache.get(name) if hasattr(self, "_ui_db_cache") else None
+                if not e:
+                    return None
+                if e.get("key") != cache_key:
+                    return None
+                if (now_ts - float(e.get("ts", 0.0))) > float(getattr(self, "_ui_db_cache_ttl_sec", 5.0)):
+                    return None
+                return e.get("val")
+
+            def _ui_cache_set(name: str, value):
+                if not hasattr(self, "_ui_db_cache"):
+                    return
+                self._ui_db_cache[name] = {"ts": now_ts, "key": cache_key, "val": value}
+
             # Layer 3: pivot from live_state (written by BreakoutScanner / sidecar), not SHM dtype
             try:
-                syms = [d["symbol"] for d in data]
-                bm = self.db.get_brk_lvl_map(syms) if syms else {}
+                bm = _ui_cache_get("brk")
+                if bm is None:
+                    bm = self.db.get_brk_lvl_map(syms) if syms else {}
+                    _ui_cache_set("brk", bm)
                 for d in data:
                     bl = bm.get(d["symbol"])
                     d["brk_lvl"] = bl
@@ -1079,8 +1337,10 @@ class MasterScanner:
                     d["brk_lvl_str"] = "—"
             try:
                 self.db.ensure_mrs_prev_day_column()
-                syms2 = [d["symbol"] for d in data]
-                pm = self.db.get_mrs_prev_day_map(syms2) if syms2 else {}
+                pm = _ui_cache_get("mrs_prev")
+                if pm is None:
+                    pm = self.db.get_mrs_prev_day_map(syms) if syms else {}
+                    _ui_cache_set("mrs_prev", pm)
                 for d in data:
                     v = pm.get(d["symbol"])
                     d["mrs_prev_day"] = v
@@ -1091,9 +1351,40 @@ class MasterScanner:
                     d["mrs_prev_day"] = None
                     d["mrs_prev_day_str"] = "—"
             try:
+                self.db.ensure_rs_prev_day_column()
+                rm = _ui_cache_get("rs_prev")
+                if rm is None:
+                    rm = self.db.get_rs_prev_day_map(syms) if syms else {}
+                    _ui_cache_set("rs_prev", rm)
+                for d in data:
+                    v = rm.get(d["symbol"])
+                    d["rs_prev_day"] = v
+                    if v is None:
+                        d["rs_delta"] = None
+                        d["rs_delta_str"] = "—"
+                        d["rs_delta_up"] = False
+                        d["rs_delta_down"] = False
+                    else:
+                        cur = int(d.get("rs_rating", 0))
+                        delta = cur - int(v)
+                        d["rs_delta"] = delta
+                        d["rs_delta_str"] = f"{delta:+d}"
+                        d["rs_delta_up"] = delta > 0
+                        d["rs_delta_down"] = delta < 0
+            except Exception as ex:
+                logger.warning("rs_prev_day merge on main grid: %s", ex)
+                for d in data:
+                    d["rs_prev_day"] = None
+                    d["rs_delta"] = None
+                    d["rs_delta_str"] = "—"
+                    d["rs_delta_up"] = False
+                    d["rs_delta_down"] = False
+            try:
                 self.db.ensure_w_rsi2_column()
-                syms_w = [d["symbol"] for d in data]
-                wm = self.db.get_w_rsi2_map(syms_w) if syms_w else {}
+                wm = _ui_cache_get("w_rsi2")
+                if wm is None:
+                    wm = self.db.get_w_rsi2_map(syms) if syms else {}
+                    _ui_cache_set("w_rsi2", wm)
                 for d in data:
                     v = wm.get(d["symbol"])
                     d["w_rsi2"] = v
@@ -1103,6 +1394,87 @@ class MasterScanner:
                 for d in data:
                     d["w_rsi2"] = None
                     d["w_rsi2_str"] = "—"
+            try:
+                ad_map = self._get_ad_snapshot_map()
+                if ad_map:
+                    for d in data:
+                        sym = d["symbol"]
+                        v = ad_map.get(sym)
+                        if v is None:
+                            v = ad_map.get(_dashboard_sym_key(sym))
+                        if v is None:
+                            continue
+                        d["ad_grade"] = v[0]
+                        d["ad_ratio"] = float(v[1])
+            except Exception as ex:
+                logger.debug("A/D merge on main grid skipped: %s", ex)
+            try:
+                eps_ca = self._get_screener_eps_canslim_ca_map()
+                _lp = getattr(self.math, "canslim_l_pass", None)
+                _np = getattr(self.math, "canslim_n_pass", None)
+                _m_ok = bool(getattr(self.math, "canslim_m_ok", False))
+                for d in data:
+                    sym = d["symbol"]
+                    idx = self.sym_to_idx.get(sym)
+                    sk = _dashboard_sym_key(sym)
+                    pair = eps_ca.get(sk)
+                    if pair is None:
+                        c_ok, a_ok = False, False
+                    else:
+                        c_ok, a_ok = bool(pair[0]), bool(pair[1])
+                    s_ok = str(d.get("ad_grade") or "").strip().upper() in ("A", "B")
+                    l_ok = bool(_lp[idx]) if _lp is not None and idx is not None and 0 <= idx < len(_lp) else False
+                    n_ok = bool(_np[idx]) if _np is not None and idx is not None and 0 <= idx < len(_np) else False
+                    m_ok = _m_ok
+                    score = int(c_ok) + int(a_ok) + int(s_ok) + int(l_ok) + int(m_ok) + int(n_ok)
+                    br = []
+                    for ok, lab in (
+                        (c_ok, "C Q EPS+"),
+                        (a_ok, "A ann EPS+"),
+                        (s_ok, "S A/D"),
+                        (l_ok, "L RS+mRS+chart"),
+                        (m_ok, "M market"),
+                        (n_ok, "N near high"),
+                    ):
+                        br.append(f"{lab}: {'ok' if ok else '—'}")
+                    tip = "CANSLIM-style checklist (6) — not investment advice.\n" + " · ".join(br)
+                    if score >= 6:
+                        icon, tier, band = "★", "Favor buy", "strong"
+                    elif score == 5:
+                        icon, tier, band = "✓", "Validated", "good"
+                    elif score == 4:
+                        icon, tier, band = "◐", "Keep watch", "track"
+                    else:
+                        icon, tier, band = "○", "Weak", "weak"
+                    d["canslim_score"] = score
+                    d["canslim_str"] = f"{score}/6"
+                    d["canslim_icon"] = icon
+                    d["canslim_tier"] = tier
+                    d["canslim_band"] = band
+                    d["canslim_cell"] = f"{icon} {score}/6 · {tier}"
+                    d["canslim_tip"] = tip
+            except Exception as ex:
+                logger.debug("CANSLIM merge on main grid skipped: %s", ex)
+                for d in data:
+                    d.setdefault("canslim_score", 0)
+                    d.setdefault("canslim_str", "0/6")
+                    d.setdefault("canslim_icon", "○")
+                    d.setdefault("canslim_tier", "Weak")
+                    d.setdefault("canslim_cell", "○ 0/6 · Weak")
+                    d.setdefault("canslim_band", "weak")
+                    d.setdefault("canslim_tip", "")
+            try:
+                an_map = self._get_recent_announcements_map()
+                if an_map:
+                    for d in data:
+                        v = an_map.get(d["symbol"])
+                        if v is None:
+                            continue
+                        d["ann_has"] = True
+                        d["ann_dt"] = v[0]
+                        d["ann_desc"] = v[1]
+            except Exception as ex:
+                logger.debug("Announcements merge on main grid skipped: %s", ex)
 
             sort_key = str(filters.get("sort_key") or "rs_rating").strip().lower()
             sort_desc = bool(filters.get("sort_desc", True))
@@ -1110,6 +1482,9 @@ class MasterScanner:
             def _sort_key(row):
                 if sort_key in ("rs", "rs_rating", "rt"):
                     return int(row["rs_rating"])
+                if sort_key in ("rs_delta", "rt_delta", "rtd"):
+                    x = row.get("rs_delta")
+                    return float(x) if x is not None else float("-inf")
                 if sort_key in ("mrs", "wmrs", "w_mrs"):
                     return float(row["mrs"])
                 if sort_key in ("dmrs", "d_mrs", "mrs_daily"):
@@ -1126,6 +1501,13 @@ class MasterScanner:
                 if sort_key in ("brk", "brk_lvl", "pivot"):
                     x = row.get("brk_lvl")
                     return float(x) if x is not None else float("-inf")
+                if sort_key in ("ad", "ad_grade", "accdist"):
+                    gm = {"A": 5, "B": 4, "C": 3, "D": 2, "E": 1}
+                    return gm.get(str(row.get("ad_grade") or "—").upper(), 0)
+                if sort_key in ("ad_ratio", "accdist_ratio"):
+                    return float(row.get("ad_ratio", 0.0))
+                if sort_key in ("canslim", "canslim_score", "cs"):
+                    return int(row.get("canslim_score", 0))
                 if sort_key in ("mrs_prev_day", "prev_mrs", "prev"):
                     x = row.get("mrs_prev_day")
                     return float(x) if x is not None else float("-inf")
@@ -1171,7 +1553,7 @@ class MasterScanner:
                         bench_change = f"{float(b_r['change_pct']):.2f}%"
                         bench_up = bool(float(b_r['change_pct']) >= 0)
 
-            logger.info(f"✅ UI Response -> Returning {len(results)} of {len(data)} results.")
+            logger.debug("✅ UI Response -> Returning %s of %s results.", len(results), len(data))
             return {
                 "results": results,
                 "total_count": len(data),

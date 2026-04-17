@@ -122,6 +122,18 @@ def breakout_data_grid():
             ),
             color="white",
         ),
+        rx.table.column_header_cell(rx.text("BRK_W", color="white")),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("D/W EMA", color="white"),
+                rx.text(BreakoutState.tf_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_tf,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell("TREND", color="white"),
         rx.table.column_header_cell(
             rx.hstack(
@@ -239,6 +251,24 @@ def breakout_data_grid():
                 rx.table.cell(r["ltp"], color=r["chp_color"], font_size="12px", padding_y="0"),
                 rx.table.cell(rx.text(r["chp"], color=r["chp_color"]), font_size="12px", padding_y="0"),
                 rx.table.cell(r["brk_lvl"], color="#D1D1D1", font_size="12px", padding_y="0"),
+                rx.table.cell(
+                    rx.text(r.get("brk_lvl_w", "—"), color="#D1D1D1"),
+                    font_size="12px",
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.text(
+                        r.get("tf_ema", "—"),
+                        color=rx.cond(
+                            r.get("dual_tf_ema_stack_ok", False),
+                            "#00FF00",
+                            "#888888",
+                        ),
+                        title=r["ema_stack_tooltip"],
+                    ),
+                    font_size="11px",
+                    padding_y="0",
+                ),
                 rx.table.cell(rx.text(r["trend_text"], color=r["trend_color"]), font_size="12px", padding_y="0"),
                 rx.table.cell(rx.text(r["mrs_weekly"], color=r["mrs_color"]), font_size="12px", padding_y="0"),
                 rx.table.cell(

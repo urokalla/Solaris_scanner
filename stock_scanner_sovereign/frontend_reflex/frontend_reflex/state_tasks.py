@@ -6,6 +6,7 @@ async def poll_results_handler(self):
     interval = max(1.0, float(settings.DASHBOARD_POLL_INTERVAL_SEC))
     while True:
         await asyncio.sleep(interval)
+        # Snapshot current UI filters/state quickly under lock.
         async with self:
             filters = {
                 "universe": self.universe,
@@ -20,7 +21,18 @@ async def poll_results_handler(self):
                 "sort_key": self.grid_sort_key,
                 "sort_desc": self.grid_sort_desc,
             }
-            view = get_scanner().get_ui_view(filters=filters, page=self.current_page, page_size=self.page_size)
+            page = self.current_page
+            page_size = self.page_size
+
+        # Run heavy scanner query off the async event loop to avoid UI hangs.
+        view = await asyncio.to_thread(
+            get_scanner().get_ui_view,
+            filters=filters,
+            page=page,
+            page_size=page_size,
+        )
+
+        async with self:
             self.scanner_results = view.get("results", [])
             self.alpha_signals = view.get("pulse", [])
             self.pulse_data = [i for i in self.alpha_signals if "NIFTY" in i.get("symbol", "")]

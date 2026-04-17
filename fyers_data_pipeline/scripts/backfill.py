@@ -239,13 +239,17 @@ def main():
     years = int(os.environ.get("BACKFILL_YEARS", "5"))
     force_rescan = os.environ.get("BACKFILL_FORCE", "").strip().lower() in ("1", "true", "yes")
     nifty500_only = os.environ.get("BACKFILL_NIFTY500_ONLY", "").strip().lower() in ("1", "true", "yes")
+    index_only = os.environ.get("BACKFILL_INDEX_ONLY", "").strip().lower() in ("1", "true", "yes")
 
     db = DatabaseManager()
-    pq_manager = ParquetManager()
+    hist_root = os.getenv("PIPELINE_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data", "historical"))
+    hist_root = os.path.abspath(hist_root)
+    pq_manager = ParquetManager(storage_path=hist_root)
     
     with db.Session() as session:
         # PROFESSIONAL FILTER: Only process real Stocks (-EQ) and Indices (-INDEX)
         # This automatically skips 'mislabeled symbols' and Gold Bond/Debt noise.
+        # BACKFILL_INDEX_ONLY=1: benchmarks only (extend NIFTY* / FINNIFTY history without touching EQ).
         today = datetime.now().date()
         sync_filter = (
             ""
@@ -254,15 +258,20 @@ def main():
         )
         join_sql = (
             "INNER JOIN universe_members um ON s.symbol_id = um.symbol_id AND um.universe_id = 'NIFTY_500'"
-            if nifty500_only
+            if nifty500_only and not index_only
             else "LEFT JOIN universe_members um ON s.symbol_id = um.symbol_id AND um.universe_id = 'NIFTY_500'"
+        )
+        kind_filter = (
+            "AND s.symbol_id LIKE '%-INDEX'"
+            if index_only
+            else "AND (s.symbol_id LIKE '%-EQ' OR s.symbol_id LIKE '%-INDEX')"
         )
         query = text(f"""
             SELECT s.symbol_id 
             FROM symbols s
             {join_sql}
             WHERE s.is_active = TRUE 
-            AND (s.symbol_id LIKE '%-EQ' OR s.symbol_id LIKE '%-INDEX')
+            {kind_filter}
             {sync_filter}
             ORDER BY 
                 CASE WHEN s.symbol_id LIKE '%INDEX%' OR s.symbol_id LIKE '%IDX%' THEN 0 ELSE 1 END ASC,
@@ -274,9 +283,11 @@ def main():
         symbols = [r[0] for r in result]
 
     logger.info(
-        "Backfill: %d symbols | years=%d | NIFTY500_only=%s | force_rescan=%s",
+        "Backfill: %d symbols | years=%d | parquet=%s | INDEX_only=%s | NIFTY500_only=%s | force_rescan=%s",
         len(symbols),
         years,
+        hist_root,
+        index_only,
         nifty500_only,
         force_rescan,
     )

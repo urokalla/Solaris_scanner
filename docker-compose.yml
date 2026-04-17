@@ -190,6 +190,8 @@ services:
         max-file: "3"
 
   # NSE → nse_corporate_announcements.csv every 1 hour by default (Events reads CSV only).
+  # Same container also runs Screener EPS → data/screener_eps_snapshot.csv once per IST day after quiet time
+  # (default 20:30 IST). No extra service. Disable: SCREENER_EPS_FETCH_ENABLED=0
   events_snapshot_cron:
     build:
       context: .
@@ -205,7 +207,34 @@ services:
       # Seconds between runs (default 3600 = 1 hour)
       - EVENTS_FETCH_INTERVAL_SEC=${EVENTS_FETCH_INTERVAL_SEC:-3600}
       - EVENTS_FETCH_DAYS=${EVENTS_FETCH_DAYS:-7}
+      # Screener EPS snapshot (prod): nightly window Asia/Kolkata equivalent via fixed +5:30
+      - SCREENER_EPS_FETCH_ENABLED=${SCREENER_EPS_FETCH_ENABLED:-1}
+      - SCREENER_EPS_IST_HOUR=${SCREENER_EPS_IST_HOUR:-20}
+      - SCREENER_EPS_IST_MINUTE=${SCREENER_EPS_IST_MINUTE:-30}
+      - SCREENER_EPS_UNIVERSE_CSV=${SCREENER_EPS_UNIVERSE_CSV:-data/nifty_total_market.csv}
+      - SCREENER_EPS_SLEEP_SEC=${SCREENER_EPS_SLEEP_SEC:-0.2}
     command: ["sh", "/app/stock_scanner_sovereign/scripts/docker_events_fetch_loop.sh"]
+    cpus: "0.15"
+    mem_limit: 384m
+    networks:
+      - sovereign_net
+
+  # NSE -> nse_pit_disclosures.csv + nse_sast_reg29.csv every 3 minutes (Insider reads CSV only).
+  insider_snapshot_cron:
+    build:
+      context: .
+      dockerfile: stock_scanner_sovereign/frontend_reflex/Dockerfile
+    container_name: sovereign_insider_snapshot_cron
+    restart: always
+    user: "1000:1000"
+    volumes:
+      - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
+    working_dir: /app/stock_scanner_sovereign
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Seconds between runs (default 180 = 3 minutes)
+      - INSIDER_FETCH_INTERVAL_SEC=${INSIDER_FETCH_INTERVAL_SEC:-180}
+    command: ["sh", "/app/stock_scanner_sovereign/scripts/docker_insider_fetch_loop.sh"]
     cpus: "0.15"
     mem_limit: 384m
     networks:

@@ -11,6 +11,25 @@ _NIFTY500_CSV_KEY: str = ""
 _NIFTY500_SYMBOLS: frozenset[str] = frozenset()
 
 
+def _parse_event_dt(s: str) -> dt.datetime:
+    x = (s or "").strip()
+    if not x:
+        return dt.datetime.min
+    for fmt in (
+        "%d-%b-%Y %H:%M:%S",
+        "%d-%b-%Y %H:%M",
+        "%d-%b-%Y",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
+        try:
+            return dt.datetime.strptime(x, fmt)
+        except ValueError:
+            pass
+    return dt.datetime.min
+
+
 def _load_nifty500_symbols() -> frozenset[str]:
     global _NIFTY500_CSV_KEY, _NIFTY500_SYMBOLS
     root = Path(__file__).resolve().parents[3]
@@ -81,7 +100,24 @@ class EventsState(rx.State):
         return len(self.filtered_rows)
 
     def on_load(self):
-        return EventsState.poll_events
+        return [EventsState.apply_url_symbol_filter, EventsState.poll_events]
+
+    def apply_url_symbol_filter(self):
+        """
+        If /events is opened with ?symbol=XXX, prefill the search box so the row is immediately visible.
+        Safe no-op when router/query params are unavailable.
+        """
+        try:
+            router = getattr(self, "router", None)
+            page = getattr(router, "page", None) if router is not None else None
+            params = getattr(page, "params", {}) if page is not None else {}
+            if not isinstance(params, dict):
+                return
+            raw = str(params.get("symbol") or "").strip().upper()
+            if raw:
+                self.search_query = raw
+        except Exception:
+            return
 
     def _tag(self, desc: str) -> tuple[str, str]:
         d = (desc or "").lower()
@@ -164,7 +200,7 @@ class EventsState(rx.State):
                             "tag_color": color,
                         }
                     )
-                rows.sort(key=lambda r: r.get("an_dt", ""), reverse=True)
+                rows.sort(key=lambda r: _parse_event_dt(str(r.get("an_dt") or "")), reverse=True)
                 async with self:
                     self.rows = rows
                     self.total_count = len(rows)

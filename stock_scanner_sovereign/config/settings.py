@@ -41,6 +41,12 @@ class Settings:
     UDAI_EMA_FAST = int(os.getenv("UDAI_EMA_FAST", "9"))
     UDAI_EMA_SLOW = int(os.getenv("UDAI_EMA_SLOW", "21"))
     UDAI_BREAKOUT_PERIOD = int(os.getenv("UDAI_BREAKOUT_PERIOD", "20"))
+    # Entry: require LTP > EMA(fast) and LTP > EMA(slow) in addition to EMA stack + Donchian (set 0 to preserve legacy).
+    UDAI_REQUIRE_PRICE_ABOVE_EMAS = os.getenv("UDAI_REQUIRE_PRICE_ABOVE_EMAS", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
     UDAI_ATR_PERIOD = int(os.getenv("UDAI_ATR_PERIOD", "9"))
     UDAI_ATR_MULT = float(os.getenv("UDAI_ATR_MULT", "3"))
     UDAI_RISK_PCT = float(os.getenv("UDAI_RISK_PCT", "1.0"))

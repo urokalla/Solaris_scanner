@@ -72,6 +72,12 @@ class BreakoutState(rx.State):
         return "▼" if self.sort_sidecar_desc else "▲"
 
     @rx.var
+    def tf_sort_arrow(self) -> str:
+        if self.sort_sidecar_key != "tf":
+            return ""
+        return "▼" if self.sort_sidecar_desc else "▲"
+
+    @rx.var
     def stage_sort_arrow(self) -> str:
         if self.sort_sidecar_key != "status":
             return ""
@@ -177,6 +183,9 @@ class BreakoutState(rx.State):
 
     def toggle_sort_brk(self):
         self.toggle_sort("brk")
+
+    def toggle_sort_tf(self):
+        self.toggle_sort("tf")
 
     def toggle_sort_stage(self):
         self.toggle_sort("status")

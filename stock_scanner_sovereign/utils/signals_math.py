@@ -1,7 +1,67 @@
-import numpy as np
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import numpy as np
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 from utils.quant_breakout_config import get_breakout_window_dict
+
+
+def collapse_sidecar_buffer_to_daily_ohlc(hv: np.ndarray | None) -> np.ndarray | None:
+    """
+    Sidecar tape mixes Parquet **daily** rows with many **live** rows (each tick as O=H=L=C=LTP).
+
+    Collapse to **one OHLCV bar per IST calendar day** (Asia/Kolkata) so pivot highs, EMAs, and week
+    maps match an **NSE-style daily** chart (e.g. TradingView 20-session high excluding today).
+
+    Input/output columns: ``[timestamp, open, high, low, close, volume]`` (same as PipelineBridge).
+    """
+    if hv is None or len(hv) < 1:
+        return None
+    rows: list[tuple] = []
+    for row in hv:
+        try:
+            ts = float(row[0])
+            o, hi, lo, cl = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+            vol = float(row[5]) if row.shape[0] > 5 else 0.0
+        except Exception:
+            continue
+        if not np.isfinite(ts) or not all(np.isfinite(x) for x in (o, hi, lo, cl)):
+            continue
+        if hi < lo or hi <= 0:
+            continue
+        d = datetime.fromtimestamp(ts, tz=_IST).date()
+        rows.append((d, ts, o, hi, lo, cl, vol))
+    if not rows:
+        return None
+    out: list[list[float]] = []
+    cur_d = None
+    bucket: list[float] | None = None
+    for d, ts, o, hi, lo, cl, vol in rows:
+        if cur_d is None:
+            cur_d = d
+            bucket = [ts, o, hi, lo, cl, vol]
+        elif d != cur_d:
+            if bucket is not None:
+                out.append(bucket)
+            cur_d = d
+            bucket = [ts, o, hi, lo, cl, vol]
+        else:
+            if bucket is None:
+                bucket = [ts, o, hi, lo, cl, vol]
+            else:
+                bucket[2] = max(bucket[2], hi)
+                bucket[3] = min(bucket[3], lo)
+                bucket[4] = cl
+                bucket[5] += vol
+                bucket[0] = ts
+    if bucket is not None:
+        out.append(bucket)
+    if len(out) < 1:
+        return None
+    return np.asarray(out, dtype=np.float64)
 
 
 def detect_pivot_high(arr, window=20):
@@ -13,15 +73,17 @@ def detect_pivot_high(arr, window=20):
 
 def effective_pivot_window(n_bars: int, pivot_w: int) -> int | None:
     """
-    Use a shorter pivot when the tape has fewer than pivot_w+1 rows (still >= 2 bars).
-    Avoids BRK_LVL staying empty while mRS/SHM are already live.
+    Donchian-style lookback on **completed** bars: we compute pivot from ``h[:-1, 2]`` (excludes the
+    current / forming bar), so usable width is ``n_bars - 1``.
+
+    Use ``min(pivot_w, n_completed)`` — not ``n_bars - 2`` — so e.g. 20 prior sessions + today
+    yields a full **20-day** high, matching typical daily-chart breakout levels.
     """
     if n_bars < 2:
         return None
-    w = max(1, min(int(pivot_w), max(1, n_bars - 2)))
-    if n_bars - 1 < w:
-        w = max(1, n_bars - 1)
-    return w
+    n_completed = n_bars - 1
+    w = min(int(pivot_w), n_completed)
+    return max(1, w)
 
 
 def compute_mrs_signal_line(mrs_history, period: int) -> float:
@@ -64,6 +126,16 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     pivot_w = max(1, min(raw_pw, 500))
     min_bars = int(params.get("min_intraday_bars_for_breakout", wd["min_intraday_bars_for_breakout"]))
 
+    h_raw = h
+    h_daily = collapse_sidecar_buffer_to_daily_ohlc(h_raw) if h_raw is not None else None
+    if h_daily is not None and len(h_daily) >= 2:
+        h = h_daily
+        # Today + pivot_w completed dailies is enough for a full pivot_w Donchian on ``h[:-1]``.
+        min_need = max(pivot_w + 1, 15)
+    else:
+        h = h_raw
+        min_need = min_bars
+
     # Provide basic status even if history is still syncing
     rs_info = params.get("rs_rating_info", {})
     mrs = float(rs_info.get("mrs", 0.0))
@@ -82,7 +154,7 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     brk_lvl = _pivot_break_level()
 
     mrs_rcvr = bool(rs_info.get("mrs_rcvr", False))
-    if h is None or len(h) < min_bars:
+    if h is None or len(h) < min_need:
         if mrs > 0:
             return {"status": "STAGE 2", "trend_up": True, "mrs": mrs, "brk_lvl": brk_lvl}
         if mrs_rcvr:

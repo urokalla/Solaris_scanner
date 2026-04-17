@@ -146,20 +146,34 @@ def seed_symbols_from_parquet(db, parquet_dir, universe_id="ALL_NSE"):
     logger.info(f"Sync complete: Seeded {len(files)} symbols from Parquet files into universe {universe_id}.")
 
 def seed_indices(db):
-    """Seed indices directly by their Fyers symbols."""
+    """
+    Seed indices by **Fyers-canonical** symbols (MID/SML cap use NIFTYMIDCAP100 / NIFTYSMLCAP100).
+
+    Legacy aliases ``NSE:MIDCAP100-INDEX`` / ``NSE:SMALLCAP100-INDEX`` are invalid on Fyers and are
+    deactivated so ``backfill.py`` does not poll them.
+    """
     indices = [
         ("NSE:NIFTY50-INDEX", "NIFTY 50", "NIFTY_50"),
         ("NSE:NIFTYBANK-INDEX", "BANK NIFTY", "BANK_NIFTY"),
-        ("NSE:MIDCAP100-INDEX", "MIDCAP 100", "MIDCAP_100"),
-        ("NSE:SMALLCAP100-INDEX", "SMALLCAP 100", "SMALLCAP_100"),
+        ("NSE:NIFTYMIDCAP100-INDEX", "NIFTY MIDCAP 100", "MIDCAP_100"),
+        ("NSE:NIFTYSMLCAP100-INDEX", "NIFTY SMALLCAP 100", "SMALLCAP_100"),
         ("NSE:NIFTY500-INDEX", "NIFTY 500", "NIFTY_500"),
     ]
     with db.Session() as session:
+        session.execute(
+            text(
+                "UPDATE symbols SET is_active = FALSE WHERE symbol_id IN "
+                "('NSE:MIDCAP100-INDEX', 'NSE:SMALLCAP100-INDEX')"
+            )
+        )
         for f_sym, desc, u_id in indices:
             session.execute(text("""
                 INSERT INTO symbols (symbol_id, description, exchange, instrument_type, is_active)
                 VALUES (:sid, :desc, 'NSE', 'IDX', TRUE)
-                ON CONFLICT (symbol_id) DO NOTHING
+                ON CONFLICT (symbol_id) DO UPDATE SET
+                    description = EXCLUDED.description,
+                    is_active = TRUE,
+                    instrument_type = 'IDX'
             """), {"sid": f_sym, "desc": desc})
             
             session.execute(text("""
@@ -168,7 +182,7 @@ def seed_indices(db):
                 ON CONFLICT DO NOTHING
             """), {"uid": u_id, "sid": f_sym})
         session.commit()
-    logger.info("Core indices seeded.")
+    logger.info("Core indices seeded (canonical tickers; legacy MIDCAP100/SMALLCAP100 aliases deactivated).")
 
 def main():
     db = DatabaseManager()

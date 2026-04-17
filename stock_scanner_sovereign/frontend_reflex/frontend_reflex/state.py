@@ -149,7 +149,7 @@ class State(rx.State):
             self.grid_sort_desc = not self.grid_sort_desc
         else:
             self.grid_sort_key = key
-            self.grid_sort_desc = key not in ("symbol", "status", "profile", "w_rsi2")
+            self.grid_sort_desc = key not in ("symbol", "status", "profile", "w_rsi2", "ad_grade")
         self.current_page = 1
 
     def set_grid_sort_field(self, label: str):
@@ -157,6 +157,7 @@ class State(rx.State):
         m = {
             "RS": "rs_rating",
             "W_mRS": "mrs",
+            "RT Δ": "rs_delta",
             "Prev W_mRS": "mrs_prev_day",
             "D_mRS": "mrs_daily",
             "RVOL": "rv",
@@ -167,13 +168,15 @@ class State(rx.State):
             "Status": "status",
             "Profile": "profile",
             "BRK": "brk_lvl",
+            "A/D": "ad_grade",
+            "CS": "canslim_score",
         }
         key = m.get(str(label or "").strip(), "rs_rating")
         if self.grid_sort_key == key:
             self.current_page = 1
             return
         self.grid_sort_key = key
-        self.grid_sort_desc = key not in ("symbol", "status", "profile", "w_rsi2")
+        self.grid_sort_desc = key not in ("symbol", "status", "profile", "w_rsi2", "ad_grade")
         self.current_page = 1
 
     def set_grid_sort_order(self, label: str):
@@ -196,6 +199,12 @@ class State(rx.State):
     @rx.var
     def grid_sort_arrow_mrs(self) -> str:
         if self.grid_sort_key != "mrs":
+            return ""
+        return "▼" if self.grid_sort_desc else "▲"
+
+    @rx.var
+    def grid_sort_arrow_rs_delta(self) -> str:
+        if self.grid_sort_key != "rs_delta":
             return ""
         return "▼" if self.grid_sort_desc else "▲"
 
@@ -242,6 +251,18 @@ class State(rx.State):
         return "▼" if self.grid_sort_desc else "▲"
 
     @rx.var
+    def grid_sort_arrow_ad(self) -> str:
+        if self.grid_sort_key != "ad_grade":
+            return ""
+        return "▼" if self.grid_sort_desc else "▲"
+
+    @rx.var
+    def grid_sort_arrow_canslim(self) -> str:
+        if self.grid_sort_key != "canslim_score":
+            return ""
+        return "▼" if self.grid_sort_desc else "▲"
+
+    @rx.var
     def grid_sort_arrow_profile(self) -> str:
         if self.grid_sort_key != "profile":
             return ""
@@ -258,6 +279,7 @@ class State(rx.State):
         rev = {
             "rs_rating": "RS",
             "mrs": "W_mRS",
+            "rs_delta": "RT Δ",
             "mrs_prev_day": "Prev W_mRS",
             "mrs_daily": "D_mRS",
             "rv": "RVOL",
@@ -268,6 +290,8 @@ class State(rx.State):
             "status": "Status",
             "profile": "Profile",
             "brk_lvl": "BRK",
+            "ad_grade": "A/D",
+            "canslim_score": "CS",
         }
         return rev.get(self.grid_sort_key, "RS")
 
@@ -314,6 +338,30 @@ class State(rx.State):
     def open_screener_in(self, symbol: str):
         """Open Screener.in for fundamental checks (separate from TradingView chart)."""
         return rx.redirect(screener_in_url(symbol), is_external=True)
+
+    def open_events_for_symbol(self, symbol: str):
+        """
+        Open Events page from main grid quick action.
+        We pass symbol in query for future deep-linking; page still works even if query is ignored.
+        """
+        s = str(symbol or "").strip().upper()
+        if not s:
+            return rx.redirect("/events")
+        return rx.redirect(f"/events?symbol={quote(s, safe=':-_')}")
+
+    def announcement_snapshot_alert(self, symbol: str, ann_dt: str, ann_desc: str):
+        """Show latest announcement snapshot in main dashboard (no page navigation)."""
+        s = str(symbol or "").strip().upper() or "—"
+        when = str(ann_dt or "").strip() or "—"
+        desc = str(ann_desc or "").strip() or "No details"
+        msg = (
+            "Latest announcement (snapshot)\n\n"
+            f"{s}\n"
+            f"Time: {when}\n"
+            f"Subject: {desc}\n\n"
+            "Tip: use 'an' again to re-check after next sync."
+        )
+        return rx.window_alert(msg)
 
     def scanner_snapshot_alert(
         self,

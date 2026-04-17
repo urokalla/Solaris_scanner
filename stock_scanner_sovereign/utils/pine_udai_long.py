@@ -2,6 +2,9 @@
 Daily Pine-style logic (Udai Long): EMA trend filter, Donchian breakout, ATR trailing stop.
 Uses ascending daily OHLCV (Parquet) + live LTP from SHM — not intraday bar EMAs.
 
+- Donchian: prior ``breakout_period`` highs (excluding current bar); cross when LTP clears that level.
+- Trend: EMA(fast) > EMA(slow); optional strict filter: LTP above both EMAs (``require_price_above_emas``).
+
 Enable with SIDECAR_UDAI_PINE=1 (see config.settings).
 """
 from __future__ import annotations
@@ -64,6 +67,7 @@ def compute_udai_pine(
     ema_fast: int = 9,
     ema_slow: int = 21,
     breakout_period: int = 20,
+    require_price_above_emas: bool = True,
     atr_period: int = 9,
     atr_mult: float = 3.0,
     risk_pct: float = 1.0,
@@ -75,6 +79,7 @@ def compute_udai_pine(
     out: dict[str, Any] = {
         "udai_ok": False,
         "udai_trend_long": False,
+        "udai_price_above_emas": False,
         "udai_entry_signal": False,
         "udai_in_pos": bool(state.get("in_pos", False)),
         "udai_trail": state.get("trail"),
@@ -98,11 +103,12 @@ def compute_udai_pine(
     ema_s = _ema_np(c_live, ema_slow)
     ema9 = float(ema_f[-1])
     ema21 = float(ema_s[-1])
+    curr = float(live_ltp)
     long_trend = ema9 > ema21
+    price_above_emas = (curr > ema9) and (curr > ema21)
 
     hh = donchian_level_excluding_last(high, breakout_period)
     prev_c = float(close[-2])
-    curr = float(live_ltp)
     crossed = (not math.isnan(hh)) and (prev_c <= hh) and (curr > hh)
 
     atr_ser = _atr_wilder(high, low, close, atr_period)
@@ -112,6 +118,7 @@ def compute_udai_pine(
 
     out["udai_ok"] = True
     out["udai_trend_long"] = long_trend
+    out["udai_price_above_emas"] = price_above_emas
     out["udai_hh_level"] = hh if not math.isnan(hh) else None
     out["udai_atr"] = atr_val
 
@@ -139,7 +146,8 @@ def compute_udai_pine(
             out["udai_ui"] = f"HOLD tr={trail:.2f}"
 
     if not state.get("in_pos", False):
-        entry_cond = long_trend and crossed
+        ema_filter = long_trend and (price_above_emas if require_price_above_emas else True)
+        entry_cond = ema_filter and crossed
         if entry_cond:
             state["in_pos"] = True
             state["trail"] = curr - float(atr_mult) * atr_val
@@ -150,7 +158,10 @@ def compute_udai_pine(
         else:
             out["udai_entry_signal"] = False
             if out.get("udai_ui") in (None, "—"):
-                out["udai_ui"] = "FLAT" if long_trend else "NO TREND"
+                if require_price_above_emas and long_trend and not price_above_emas:
+                    out["udai_ui"] = "BO but <EMA"
+                else:
+                    out["udai_ui"] = "FLAT" if long_trend else "NO TREND"
     else:
         out.setdefault("udai_entry_signal", False)
 

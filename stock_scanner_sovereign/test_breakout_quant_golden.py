@@ -10,6 +10,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.breakout_math import calculate_breakout_signals, compute_mrs_signal_line
+from utils.signals_math import effective_pivot_window
 from utils.quant_breakout_config import get_breakout_window_dict, merge_params_with_windows
 
 
@@ -128,6 +129,15 @@ def test_golden_custom_pivot_window():
     )
     r = calculate_breakout_signals("NSE:TEST-EQ", h, None, params)
     assert r["status"] == "BREAKOUT"
+
+
+def test_effective_pivot_window_matches_completed_bar_count():
+    """Pivot width is min(pivot_w, len(h)-1): 20 priors + today → full 20-day lookback."""
+    assert effective_pivot_window(21, 20) == 20
+    assert effective_pivot_window(22, 20) == 20
+    assert effective_pivot_window(15, 20) == 14
+    assert effective_pivot_window(2, 20) == 1
+    assert effective_pivot_window(1, 20) is None
 
 
 def test_golden_brk_lvl_populated_below_min_bars():

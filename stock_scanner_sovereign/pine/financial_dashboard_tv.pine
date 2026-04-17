@@ -1,0 +1,228 @@
+//@version=5
+// Per-symbol fundamentals via request.financial; prior quarters from ta.valuewhen (needs chart history).
+// Extended: 12 FQ rows (~3y). Load long history on chart if older rows are na.
+indicator("Financial Dashboard — TV (12 FQ + tech)", shorttitle = "FinDash 12Q", overlay = true, max_labels_count = 500)
+
+string G0 = "Source"
+bool ign = input.bool(true, "Ignore invalid symbol (financial)", group = G0)
+bool use_manual = input.bool(false, "Manual top strip only", group = G0)
+
+string G1 = "Units"
+float CR_DIV = input.float(10000000, "÷ for sales/MCap (INR crore = 1e7)", group = G1)
+
+string G2 = "Manual top (if enabled)"
+string mCap_m   = input.string("", "MCap text", group = G2)
+string pe_m     = input.string("", "P/E text", group = G2)
+string ffloat_m = input.string("", "FFloat% text", group = G2)
+
+color BORDER    = color.new(color.gray, 80)
+color TEXT_LBL  = color.new(color.gray, 30)
+color POS_GREEN = #2e7d32
+color NEUTRAL   = color.new(color.gray, 0)
+
+fin_fq(string id) =>
+    request.financial(syminfo.tickerid, id, "FQ", barmerge.gaps_off, ign)
+
+fin_ttm(string id) =>
+    request.financial(syminfo.tickerid, id, "TTM", barmerge.gaps_off, ign)
+
+fin_fy(string id) =>
+    request.financial(syminfo.tickerid, id, "FY", barmerge.gaps_off, ign)
+
+// Lag helpers: occurrence must be compile-time constant (no for-loop index).
+fin_fq_lag0(string id) =>
+    fin_fq(id)
+
+fin_fq_lag1(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 0)
+
+fin_fq_lag2(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 1)
+
+fin_fq_lag3(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 2)
+
+fin_fq_lag4(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 3)
+
+fin_fq_lag5(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 4)
+
+fin_fq_lag6(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 5)
+
+fin_fq_lag7(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 6)
+
+fin_fq_lag8(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 7)
+
+fin_fq_lag9(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 8)
+
+fin_fq_lag10(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 9)
+
+fin_fq_lag11(string id) =>
+    float x = fin_fq(id)
+    bool st = not na(x) and (na(x[1]) or x != x[1])
+    ta.valuewhen(st, x[1], 10)
+
+f_txt_pct(float x) =>
+    na(x) ? "" : str.format("{0,number,0.##}%", x)
+
+f_txt2(float x) =>
+    na(x) ? "" : str.tostring(x, "#.##")
+
+f_sales(float rev) =>
+    na(rev) ? "" : str.tostring(rev / CR_DIV, "#.##")
+
+f_mcap_txt(float raw) =>
+    if na(raw) or raw <= 0
+        ""
+    else
+        float cr = raw / CR_DIV
+        cr >= 1000.0 ? str.tostring(cr / 1000.0, "#.##") + "K cr" : str.tostring(cr, "#.##") + " cr"
+
+f_pct_metric(float x) =>
+    na(x) ? "" : str.tostring(x, "#.##") + "%"
+
+float tso0 = fin_fq("TOTAL_SHARES_OUTSTANDING")
+float mcap = tso0 * close
+
+float epsTTM = fin_ttm("EARNINGS_PER_SHARE_DILUTED")
+float pe_v   = na(epsTTM) or epsTTM <= 0 ? na : close / epsTTM
+
+float ffSh  = fin_fy("FLOAT_SHARES_OUTSTANDING")
+float ffPct = na(ffSh) or na(tso0) or tso0 <= 0 ? na : 100.0 * ffSh / tso0
+
+string mCap_disp   = use_manual ? mCap_m   : f_mcap_txt(mcap)
+string pe_disp     = use_manual ? pe_m     : f_txt2(pe_v)
+string ffloat_disp = use_manual ? ffloat_m : f_txt2(ffPct)
+
+float h52      = ta.highest(high, 252)
+float l52      = ta.lowest(low, 252)
+float distHigh = na(h52) or h52 == 0 ? na : (h52 - close) / h52 * 100.0
+float distLow  = na(l52) or l52 == 0 ? na : (close - l52) / l52 * 100.0
+float adr      = ta.sma((high - low) / close * 100.0, 20)
+float tOver5D  = ta.sma(volume * close, 5) / 10000000.0
+float avgTOver = ta.sma(volume * close, 50) / 10000000.0
+float rvol     = volume / ta.sma(volume, 50)
+
+f_fmt_v(float x) =>
+    na(x) ? "" : str.tostring(x, "#.##")
+
+f_fmt_p(float x) =>
+    na(x) ? "" : str.format("{0,number,#.##}%", x)
+
+int N_Q_ROWS = 12
+int T_ROW0 = 3 + N_Q_ROWS + 1
+
+var table t = table.new(position.top_right, 7, T_ROW0 + 4, bgcolor = color.white, border_width = 1, border_color = BORDER)
+
+clear7(int rowY) =>
+    table.cell(t, 0, rowY, "")
+    table.cell(t, 1, rowY, "")
+    table.cell(t, 2, rowY, "")
+    table.cell(t, 3, rowY, "")
+    table.cell(t, 4, rowY, "")
+    table.cell(t, 5, rowY, "")
+    table.cell(t, 6, rowY, "")
+
+// rowY must be literal at each call site for strict builds
+fill_fq_row(int rowY, string qtxt, float eps, float eYo, float rev, float rYo, float roe, float opm, bool greenRow) =>
+    bool ok = not na(eps) or not na(rev) or not na(roe) or not na(opm)
+    if not ok
+        clear7(rowY)
+    else
+        color cE = greenRow ? POS_GREEN : NEUTRAL
+        color cY = greenRow ? POS_GREEN : NEUTRAL
+        table.cell(t, 0, rowY, qtxt)
+        table.cell(t, 1, rowY, f_txt2(eps), text_color = cE)
+        table.cell(t, 2, rowY, f_txt_pct(eYo), text_color = cY)
+        table.cell(t, 3, rowY, f_sales(rev))
+        table.cell(t, 4, rowY, f_txt_pct(rYo), text_color = cY)
+        table.cell(t, 5, rowY, f_pct_metric(roe))
+        table.cell(t, 6, rowY, f_pct_metric(opm))
+
+if barstate.islast
+    table.cell(t, 0, 0, syminfo.ticker + " · " + syminfo.sector + " ↔ " + syminfo.industry, text_color = color.black, text_size = size.small)
+    table.merge_cells(t, 0, 0, 6, 0)
+
+    table.cell(t, 0, 1, "MCap", text_color = TEXT_LBL)
+    table.cell(t, 1, 1, mCap_disp)
+    table.cell(t, 2, 1, "P/E", text_color = TEXT_LBL)
+    table.cell(t, 3, 1, pe_disp)
+    table.cell(t, 4, 1, "FFloat%", text_color = TEXT_LBL)
+    table.cell(t, 5, 1, ffloat_disp)
+    table.merge_cells(t, 5, 1, 6, 1)
+
+    string[] h = array.from("Qtr", "EPS", "YoY%", "Sales", "YoY%", "ROE", "OPM")
+    for i = 0 to 6
+        table.cell(t, i, 2, array.get(h, i), text_color = TEXT_LBL, text_size = size.small)
+
+    if use_manual
+        clear7(3)
+        clear7(4)
+        clear7(5)
+        clear7(6)
+        clear7(7)
+        clear7(8)
+        clear7(9)
+        clear7(10)
+        clear7(11)
+        clear7(12)
+        clear7(13)
+        clear7(14)
+    else
+        fill_fq_row(3,  "Latest FQ", fin_fq_lag0("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag0("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag0("TOTAL_REVENUE"),  fin_fq_lag0("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag0("RETURN_ON_EQUITY"),  fin_fq_lag0("OPERATING_MARGIN"),  true)
+        fill_fq_row(4,  "−1 FQ",     fin_fq_lag1("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag1("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag1("TOTAL_REVENUE"),  fin_fq_lag1("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag1("RETURN_ON_EQUITY"),  fin_fq_lag1("OPERATING_MARGIN"),  false)
+        fill_fq_row(5,  "−2 FQ",     fin_fq_lag2("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag2("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag2("TOTAL_REVENUE"),  fin_fq_lag2("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag2("RETURN_ON_EQUITY"),  fin_fq_lag2("OPERATING_MARGIN"),  false)
+        fill_fq_row(6,  "−3 FQ",     fin_fq_lag3("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag3("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag3("TOTAL_REVENUE"),  fin_fq_lag3("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag3("RETURN_ON_EQUITY"),  fin_fq_lag3("OPERATING_MARGIN"),  false)
+        fill_fq_row(7,  "−4 FQ",     fin_fq_lag4("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag4("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag4("TOTAL_REVENUE"),  fin_fq_lag4("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag4("RETURN_ON_EQUITY"),  fin_fq_lag4("OPERATING_MARGIN"),  false)
+        fill_fq_row(8,  "−5 FQ",     fin_fq_lag5("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag5("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag5("TOTAL_REVENUE"),  fin_fq_lag5("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag5("RETURN_ON_EQUITY"),  fin_fq_lag5("OPERATING_MARGIN"),  false)
+        fill_fq_row(9,  "−6 FQ",     fin_fq_lag6("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag6("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag6("TOTAL_REVENUE"),  fin_fq_lag6("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag6("RETURN_ON_EQUITY"),  fin_fq_lag6("OPERATING_MARGIN"),  false)
+        fill_fq_row(10, "−7 FQ",     fin_fq_lag7("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag7("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag7("TOTAL_REVENUE"),  fin_fq_lag7("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag7("RETURN_ON_EQUITY"),  fin_fq_lag7("OPERATING_MARGIN"),  false)
+        fill_fq_row(11, "−8 FQ",     fin_fq_lag8("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag8("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag8("TOTAL_REVENUE"),  fin_fq_lag8("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag8("RETURN_ON_EQUITY"),  fin_fq_lag8("OPERATING_MARGIN"),  false)
+        fill_fq_row(12, "−9 FQ",     fin_fq_lag9("EARNINGS_PER_SHARE_DILUTED"),  fin_fq_lag9("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"),  fin_fq_lag9("TOTAL_REVENUE"),  fin_fq_lag9("REVENUE_ONE_YEAR_GROWTH"),  fin_fq_lag9("RETURN_ON_EQUITY"),  fin_fq_lag9("OPERATING_MARGIN"),  false)
+        fill_fq_row(13, "−10 FQ",    fin_fq_lag10("EARNINGS_PER_SHARE_DILUTED"), fin_fq_lag10("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"), fin_fq_lag10("TOTAL_REVENUE"), fin_fq_lag10("REVENUE_ONE_YEAR_GROWTH"), fin_fq_lag10("RETURN_ON_EQUITY"), fin_fq_lag10("OPERATING_MARGIN"), false)
+        fill_fq_row(14, "−11 FQ",    fin_fq_lag11("EARNINGS_PER_SHARE_DILUTED"), fin_fq_lag11("EARNINGS_PER_SHARE_DILUTED_ONE_YEAR_GROWTH"), fin_fq_lag11("TOTAL_REVENUE"), fin_fq_lag11("REVENUE_ONE_YEAR_GROWTH"), fin_fq_lag11("RETURN_ON_EQUITY"), fin_fq_lag11("OPERATING_MARGIN"), false)
+
+    int tr = T_ROW0
+    table.cell(t, 0, tr, "▼ 52W HIGH", text_halign = text.align_left, text_color = TEXT_LBL)
+    table.cell(t, 1, tr, f_fmt_p(distHigh))
+    table.cell(t, 2, tr, "TOver ₹ | 5D", text_color = TEXT_LBL)
+    table.cell(t, 3, tr, f_fmt_v(tOver5D))
+    table.merge_cells(t, 3, tr, 6, tr)
+
+    table.cell(t, 0, tr + 1, "▲ 52W LOW", text_halign = text.align_left, text_color = TEXT_LBL)
+    table.cell(t, 1, tr + 1, f_fmt_p(distLow))
+    table.cell(t, 2, tr + 1, "Avg TOvr | 50", text_color = TEXT_LBL)
+    table.cell(t, 3, tr + 1, f_fmt_v(avgTOver))
+    table.merge_cells(t, 3, tr + 1, 6, tr + 1)
+
+    table.cell(t, 0, tr + 2, "ADR | 20", text_color = TEXT_LBL)
+    table.cell(t, 1, tr + 2, f_fmt_p(adr))
+    table.cell(t, 2, tr + 2, "RVOL(x) | 50", text_color = TEXT_LBL)
+    table.cell(t, 3, tr + 2, f_fmt_v(rvol))
+    table.merge_cells(t, 3, tr + 2, 6, tr + 2)

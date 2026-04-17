@@ -10,7 +10,12 @@ from config.settings import settings
 from utils.breakout_math import calculate_breakout_signals
 from utils.quant_breakout_config import merge_params_with_windows
 from utils.pine_udai_long import compute_udai_pine
-from utils.signals_math import compute_mrs_signal_line, detect_pivot_high, effective_pivot_window
+from utils.signals_math import (
+    collapse_sidecar_buffer_to_daily_ohlc,
+    compute_mrs_signal_line,
+    detect_pivot_high,
+    effective_pivot_window,
+)
 from utils.monthly_rsi2_trade_rules import (
     blend_last_daily_bar_with_ltp,
     daily_close_series_from_ohlcv,
@@ -19,6 +24,7 @@ from utils.monthly_rsi2_trade_rules import (
 )
 
 LGR = logging.getLogger("Breakout")
+_IST = ZoneInfo("Asia/Kolkata")
 
 def _weekly_close_map_from_ohlcv(h: np.ndarray) -> dict[tuple[int, int], float]:
     """
@@ -38,7 +44,7 @@ def _weekly_close_map_from_ohlcv(h: np.ndarray) -> dict[tuple[int, int], float]:
                 continue
             if not np.isfinite(ts) or not np.isfinite(c) or c <= 0:
                 continue
-            d = datetime.utcfromtimestamp(ts).date()
+            d = datetime.fromtimestamp(ts, tz=_IST).date()
             iso = d.isocalendar()
             out[(int(iso.year), int(iso.week))] = c
     except Exception:
@@ -70,7 +76,7 @@ def _stage1_price_box_from_ohlcv(h: np.ndarray) -> tuple[bool, int, float, bool,
                 continue
             if hi <= 0 or lo <= 0 or cl <= 0 or lo > hi:
                 continue
-            d = datetime.utcfromtimestamp(ts).date()
+            d = datetime.fromtimestamp(ts, tz=_IST).date()
             iso = d.isocalendar()
             k = (int(iso.year), int(iso.week))
             w = week.get(k)
@@ -206,6 +212,40 @@ def _ema_series(values: np.ndarray, n: int) -> np.ndarray:
     return out
 
 
+def _weekly_high_close_series_from_hv(hv: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """
+    Collapse daily OHLCV rows to one (week_high, week_close) per ISO week, oldest → newest.
+    Week key = (year, week); last row in buffer for that week wins on close, max aggregates high.
+    """
+    if hv is None or len(hv) < 5:
+        return None
+    week: dict[tuple[int, int], list[float]] = {}
+    for row in hv:
+        try:
+            ts = float(row[0])
+            hi = float(row[2])
+            cl = float(row[4])
+        except Exception:
+            continue
+        if not (np.isfinite(ts) and np.isfinite(hi) and np.isfinite(cl) and hi > 0 and cl > 0):
+            continue
+        d = datetime.fromtimestamp(ts, tz=_IST).date()
+        iso = d.isocalendar()
+        k = (int(iso[0]), int(iso[1]))
+        if k not in week:
+            week[k] = [hi, cl]
+        else:
+            if hi > week[k][0]:
+                week[k][0] = hi
+            week[k][1] = cl
+    if len(week) < 4:
+        return None
+    keys = sorted(week.keys())
+    highs = np.asarray([week[k][0] for k in keys], dtype=np.float64)
+    closes = np.asarray([week[k][1] for k in keys], dtype=np.float64)
+    return highs, closes
+
+
 def _decode_shm_grid_status(raw) -> str:
     """Master SHM `status`: BUY | TRENDING | NOT TRENDING (weekly mRS rules; see docs/quant_rs_accuracy.md)."""
     if raw is None:
@@ -269,7 +309,11 @@ def main_loop_helper(self):
         tasks, self.pending = list(self.pending), set()
         b_vw = self.buffers[self.bench_sym].get_ordered_view() if self.bench_sym in self.buffers else None
         for s in tasks:
-            if (idx := self.shm.get_idx(s)) is not None and s in self.buffers:
+            # Stale `pending` tickers after `update_universe()` can still be processed once; new `results`
+            # only has `all_s` keys—skip to avoid KeyError on `self.results[s]`.
+            if s not in self.results or s not in self.buffers:
+                continue
+            if (idx := self.shm.get_idx(s)) is not None:
                 row = self.arr[idx]
 
                 # --- PRO EDITION: SIGNAL LINE & CROSSOVERS ---
@@ -292,10 +336,18 @@ def main_loop_helper(self):
                 mrs_deque = self._mrs_history_buffers[s]["mrs"]
                 mrs_signal = compute_mrs_signal_line(mrs_deque, mrs_period)
                 hv = self.buffers[s].get_ordered_view()
+                hv_d = collapse_sidecar_buffer_to_daily_ohlc(hv) if hv is not None else None
+                hv_bar = hv_d if hv_d is not None and len(hv_d) >= 2 else hv
+                b_bar = (
+                    collapse_sidecar_buffer_to_daily_ohlc(b_vw)
+                    if b_vw is not None
+                    else None
+                )
+                b_bar = b_bar if b_bar is not None and len(b_bar) >= 2 else b_vw
                 # Daily EMA30 context for pullback/pierce filters.
                 try:
-                    if hv is not None and len(hv) >= 2:
-                        cser = np.asarray(hv[:, 4], dtype=np.float64)
+                    if hv_bar is not None and len(hv_bar) >= 2:
+                        cser = np.asarray(hv_bar[:, 4], dtype=np.float64)
                         e30 = _ema_series(cser, 30)
                         ema30_val = float(e30[-1]) if e30.size else float("nan")
                         ema30_prev = float(e30[-2]) if e30.size >= 2 else float("nan")
@@ -309,9 +361,11 @@ def main_loop_helper(self):
                     ema30_prev = float("nan")
                     prev_close = float("nan")
                 with self.lock:
-                    self.results[s]["ema30"] = ema30_val
-                    self.results[s]["ema30_prev"] = ema30_prev
-                    self.results[s]["prev_close"] = prev_close
+                    _r = self.results.get(s)
+                    if _r is not None:
+                        _r["ema30"] = ema30_val
+                        _r["ema30_prev"] = ema30_prev
+                        _r["prev_close"] = prev_close
 
                 # 2.4 Stage-1 price box (8+ week accumulation base)
                 box_refresh = float(os.getenv("STAGE1_BOX_REFRESH_SEC", "120"))
@@ -328,7 +382,7 @@ def main_loop_helper(self):
                     ma_dev = float(box_cached.get("ma_dev", 0.0))
                     stage2_confirm = bool(box_cached.get("stage2_confirm", False))
                 else:
-                    box_flag, box_weeks, box_range, vol_dry, vol_dry_ratio, ma_flat, ma_dev, stage2_confirm = _stage1_price_box_from_ohlcv(hv)
+                    box_flag, box_weeks, box_range, vol_dry, vol_dry_ratio, ma_flat, ma_dev, stage2_confirm = _stage1_price_box_from_ohlcv(hv_bar)
                     self._stage1_box_cache[s] = {
                         "ts": time.time(),
                         "flag": bool(box_flag),
@@ -341,17 +395,19 @@ def main_loop_helper(self):
                         "stage2_confirm": bool(stage2_confirm),
                     }
                 with self.lock:
-                    self.results[s]["stage1_box"] = bool(box_flag)
-                    self.results[s]["stage1_box_weeks"] = int(box_weeks)
-                    self.results[s]["stage1_box_range"] = float(box_range)
-                    self.results[s]["stage1_vol_dry"] = bool(vol_dry)
-                    self.results[s]["stage1_vol_dry_ratio"] = float(vol_dry_ratio)
-                    self.results[s]["stage1_ma_flat"] = bool(ma_flat)
-                    self.results[s]["stage1_ma_dev"] = float(ma_dev)
-                    self.results[s]["stage2_confirm"] = bool(stage2_confirm)
+                    _r = self.results.get(s)
+                    if _r is not None:
+                        _r["stage1_box"] = bool(box_flag)
+                        _r["stage1_box_weeks"] = int(box_weeks)
+                        _r["stage1_box_range"] = float(box_range)
+                        _r["stage1_vol_dry"] = bool(vol_dry)
+                        _r["stage1_vol_dry_ratio"] = float(vol_dry_ratio)
+                        _r["stage1_ma_flat"] = bool(ma_flat)
+                        _r["stage1_ma_dev"] = float(ma_dev)
+                        _r["stage2_confirm"] = bool(stage2_confirm)
 
                 # 2.5. RVCR (weekly-style): match TradingView weekly pane.
-                # - Compute weekly Mansfield mRS series from daily history buffer (hv) + benchmark (b_vw).
+                # - Compute weekly Mansfield mRS series from daily OHLC (hv_bar) + benchmark (b_bar).
                 # - Compute mRS_signal = SMA(mRS, 30) (your Pine script).
                 # - Compute slopeLine = EMA(mRS, 30) or SMA(mRS, 30) (your "slope line").
                 # - Signal when: slopeLine is rising by eps AND signal line crosses above slope line.
@@ -366,16 +422,18 @@ def main_loop_helper(self):
                 cached = self._rvcr_weekly_cache.get(s)
                 if cached and (now_ts - float(cached.get("ts", 0))) < rvcr_refresh:
                     with self.lock:
-                        self.results[s]["mrs_rcvr"] = bool(cached.get("flag", False))
-                        self.results[s]["mrs_rcvr_slope"] = float(cached.get("slope", 0.0))
-                        self.results[s]["mrs_neg_ma10_rising"] = bool(cached.get("neg_ma10_rising", False))
+                        _r = self.results.get(s)
+                        if _r is not None:
+                            _r["mrs_rcvr"] = bool(cached.get("flag", False))
+                            _r["mrs_rcvr_slope"] = float(cached.get("slope", 0.0))
+                            _r["mrs_neg_ma10_rising"] = bool(cached.get("neg_ma10_rising", False))
                 else:
                     flag = False
                     slope_val = 0.0
                     neg_ma10_rising = False
                     try:
-                        wk_s = _weekly_close_map_from_ohlcv(hv)
-                        wk_b = _weekly_close_map_from_ohlcv(b_vw) if b_vw is not None else {}
+                        wk_s = _weekly_close_map_from_ohlcv(hv_bar)
+                        wk_b = _weekly_close_map_from_ohlcv(b_bar) if b_bar is not None else {}
                         if wk_s and wk_b:
                             keys = sorted(set(wk_s.keys()) & set(wk_b.keys()))
                             # Allow shorter-history symbols by adapting MA lengths to available weeks.
@@ -446,44 +504,108 @@ def main_loop_helper(self):
                         "neg_ma10_rising": bool(neg_ma10_rising),
                     }
                     with self.lock:
-                        self.results[s]["mrs_rcvr"] = bool(flag)
-                        self.results[s]["mrs_rcvr_slope"] = float(slope_val)
-                        self.results[s]["mrs_neg_ma10_rising"] = bool(neg_ma10_rising)
+                        _r = self.results.get(s)
+                        if _r is not None:
+                            _r["mrs_rcvr"] = bool(flag)
+                            _r["mrs_rcvr_slope"] = float(slope_val)
+                            _r["mrs_neg_ma10_rising"] = bool(neg_ma10_rising)
 
                 # Latch RVCR while mRS is below zero so Stage-1 candidates do not flicker.
                 with self.lock:
-                    prev_latched = bool(self.results[s].get("mrs_rcvr_latched", False))
-                    curr_flag = bool(self.results[s].get("mrs_rcvr", False))
-                    if current_mrs < 0:
-                        latched = prev_latched or curr_flag
-                    else:
-                        latched = False
-                    self.results[s]["mrs_rcvr_latched"] = latched
-                    self.results[s]["mrs_rcvr"] = latched
+                    _r = self.results.get(s)
+                    if _r is not None:
+                        prev_latched = bool(_r.get("mrs_rcvr_latched", False))
+                        curr_flag = bool(_r.get("mrs_rcvr", False))
+                        if current_mrs < 0:
+                            latched = prev_latched or curr_flag
+                        else:
+                            latched = False
+                        _r["mrs_rcvr_latched"] = latched
+                        _r["mrs_rcvr"] = latched
 
                 # 3. Generate Pro Signature Signal
+                with self.lock:
+                    _r = self.results.get(s)
+                if _r is None:
+                    continue
                 p["rs_rating_info"] = {
                     "rs_rating": int(row['rs_rating']),
                     "mrs": current_mrs,
                     "mrs_prev": float(row['mrs_prev']) if 'mrs_prev' in row.dtype.names else current_mrs,
                     "mrs_signal": mrs_signal,
-                    "mrs_rcvr": bool(self.results[s].get("mrs_rcvr", False)),
-                    "stage1_box": bool(self.results[s].get("stage1_box", False)),
-                    "mrs_neg_ma10_rising": bool(self.results[s].get("mrs_neg_ma10_rising", False)),
-                    "stage2_confirm": bool(self.results[s].get("stage2_confirm", False)),
+                    "mrs_rcvr": bool(_r.get("mrs_rcvr", False)),
+                    "stage1_box": bool(_r.get("stage1_box", False)),
+                    "mrs_neg_ma10_rising": bool(_r.get("mrs_neg_ma10_rising", False)),
+                    "stage2_confirm": bool(_r.get("stage2_confirm", False)),
                 }
                 try:
-                    res = calculate_breakout_signals(s, hv, b_vw, p)
+                    res = calculate_breakout_signals(s, hv_bar, b_bar, p)
                     if res:
-                        self.results[s].update(res)
+                        _r.update(res)
                         # SHM `status` is owned by the master (e.g. BUY NOW on mRS cross). Do not mirror
                         # breakout labels (STAGE 2, …) here — they overwrite and flicker vs the RS grid.
                         # Breakout page uses self.results + format_ui_row only.
                     raw_pw = int(p["pivot_high_window"])
                     pw_cap = max(1, min(raw_pw, 500))
-                    pw_use = effective_pivot_window(len(hv), pw_cap) if hv is not None else None
-                    if pw_use is not None and hv is not None:
-                        self.results[s]["brk_lvl"] = float(detect_pivot_high(hv[:-1, 2], pw_use))
+                    pw_use = effective_pivot_window(len(hv_bar), pw_cap) if hv_bar is not None else None
+                    if pw_use is not None and hv_bar is not None:
+                        _r["brk_lvl"] = float(detect_pivot_high(hv_bar[:-1, 2], pw_use))
+
+                    # Daily + weekly: same pivot window length (daily bars vs weekly buckets) + EMA9 > EMA21 each TF.
+                    ema_fast = max(2, int(settings.UDAI_EMA_FAST))
+                    ema_slow = max(3, int(settings.UDAI_EMA_SLOW))
+                    if hv_bar is not None and len(hv_bar) >= ema_slow + 2:
+                        cser = np.asarray(hv_bar[:, 4], dtype=np.float64)
+                        e9d = _ema_series(cser, ema_fast)
+                        e21d = _ema_series(cser, ema_slow)
+                        e9dv, e21dv = float(e9d[-1]), float(e21d[-1])
+                        d_ok = (
+                            np.isfinite(e9dv)
+                            and np.isfinite(e21dv)
+                            and e9dv > e21dv
+                        )
+                        _r["ema9_d"] = e9dv if np.isfinite(e9dv) else None
+                        _r["ema21_d"] = e21dv if np.isfinite(e21dv) else None
+                        _r["daily_ema_stack_ok"] = bool(d_ok)
+                    else:
+                        _r["ema9_d"] = None
+                        _r["ema21_d"] = None
+                        _r["daily_ema_stack_ok"] = False
+
+                    wc = _weekly_high_close_series_from_hv(hv_bar) if hv_bar is not None else None
+                    if wc is not None:
+                        wh, wcl = wc
+                        pw_w = effective_pivot_window(len(wh), pw_cap)
+                        if pw_w is not None and len(wh) >= pw_w + 1:
+                            _r["brk_lvl_w"] = float(detect_pivot_high(wh[:-1], pw_w))
+                        else:
+                            _r["brk_lvl_w"] = None
+                        if wcl.size >= ema_slow + 1:
+                            e9w = _ema_series(wcl, ema_fast)
+                            e21w = _ema_series(wcl, ema_slow)
+                            e9wv, e21wv = float(e9w[-1]), float(e21w[-1])
+                            w_ok = (
+                                np.isfinite(e9wv)
+                                and np.isfinite(e21wv)
+                                and e9wv > e21wv
+                            )
+                            _r["ema9_w"] = e9wv if np.isfinite(e9wv) else None
+                            _r["ema21_w"] = e21wv if np.isfinite(e21wv) else None
+                            _r["weekly_ema_stack_ok"] = bool(w_ok)
+                        else:
+                            _r["ema9_w"] = None
+                            _r["ema21_w"] = None
+                            _r["weekly_ema_stack_ok"] = False
+                    else:
+                        _r["brk_lvl_w"] = None
+                        _r["ema9_w"] = None
+                        _r["ema21_w"] = None
+                        _r["weekly_ema_stack_ok"] = False
+
+                    d_stack = bool(_r.get("daily_ema_stack_ok"))
+                    w_stack = bool(_r.get("weekly_ema_stack_ok"))
+                    _r["dual_tf_ema_stack_ok"] = d_stack and w_stack
+                    _r["dual_tf_stack_score"] = int(d_stack) + int(w_stack)
                 except Exception as e:
                     LGR.error(f"Error calculating breakout signals for {s}: {e}")
 
@@ -505,7 +627,9 @@ def main_loop_helper(self):
                     if d_hist is not None:
                         try:
                             st = self.udai_state.setdefault(s, {"in_pos": False, "trail": None})
-                            lp = float(self.results[s].get("ltp", 0) or float(row["ltp"]))
+                            with self.lock:
+                                _ru = self.results.get(s)
+                            lp = float((_ru.get("ltp", 0) if _ru else 0) or float(row["ltp"]))
                             u = compute_udai_pine(
                                 d_hist,
                                 lp,
@@ -513,13 +637,15 @@ def main_loop_helper(self):
                                 ema_fast=settings.UDAI_EMA_FAST,
                                 ema_slow=settings.UDAI_EMA_SLOW,
                                 breakout_period=settings.UDAI_BREAKOUT_PERIOD,
+                                require_price_above_emas=settings.UDAI_REQUIRE_PRICE_ABOVE_EMAS,
                                 atr_period=settings.UDAI_ATR_PERIOD,
                                 atr_mult=settings.UDAI_ATR_MULT,
                                 risk_pct=settings.UDAI_RISK_PCT,
                                 account_equity=settings.UDAI_ACCOUNT_EQUITY,
                             )
                             self.udai_state[s] = st
-                            self.results[s].update(u)
+                            if _ru is not None:
+                                _ru.update(u)
                         except Exception as e:
                             LGR.error(f"Udai Pine {s}: {e}")
 
@@ -609,18 +735,23 @@ def _refresh_sidecar_monthly_rsi2(self):
                     d_hist = self.db.get_historical_data(s, "1d", limit=400)
             if d_hist is None or len(d_hist) < 80:
                 with self.lock:
-                    self.results[s]["m_rsi2"] = None
-                    self.results[s]["m_rsi2_live"] = False
+                    _rm = self.results.get(s)
+                    if _rm is not None:
+                        _rm["m_rsi2"] = None
+                        _rm["m_rsi2_live"] = False
                 continue
             arr = np.asarray(d_hist)
             base = daily_close_series_from_ohlcv(arr)
             if base is None:
                 with self.lock:
-                    self.results[s]["m_rsi2"] = None
-                    self.results[s]["m_rsi2_live"] = False
+                    _rm = self.results.get(s)
+                    if _rm is not None:
+                        _rm["m_rsi2"] = None
+                        _rm["m_rsi2_live"] = False
                 continue
             with self.lock:
-                lp = float(self.results[s].get("ltp", 0) or 0)
+                _rm = self.results.get(s)
+                lp = float(_rm.get("ltp", 0) or 0) if _rm is not None else 0.0
             series = base
             used_live = False
             if live_ok and lp > 0:
@@ -628,12 +759,14 @@ def _refresh_sidecar_monthly_rsi2(self):
                 used_live = True
             lr = latest_monthly_rsi2(series, period=2)
             with self.lock:
-                if lr:
-                    self.results[s]["m_rsi2"] = float(lr[1])
-                    self.results[s]["m_rsi2_live"] = used_live
-                else:
-                    self.results[s]["m_rsi2"] = None
-                    self.results[s]["m_rsi2_live"] = False
+                _rm = self.results.get(s)
+                if _rm is not None:
+                    if lr:
+                        _rm["m_rsi2"] = float(lr[1])
+                        _rm["m_rsi2_live"] = used_live
+                    else:
+                        _rm["m_rsi2"] = None
+                        _rm["m_rsi2_live"] = False
         except Exception as e:
             LGR.error(f"mRSI2 {s}: {e}")
 
@@ -923,6 +1056,24 @@ def format_ui_row(d):
     ui_s = s.split(":")[1].split("-")[0] if ":" in s else s
     brk = d.get('brk_lvl')
     brk_disp = f"{float(brk):.2f}" if brk is not None else "—"
+    brk_w = d.get("brk_lvl_w")
+    brk_w_disp = f"{float(brk_w):.2f}" if brk_w is not None else "—"
+    d_st = bool(d.get("daily_ema_stack_ok"))
+    w_st = bool(d.get("weekly_ema_stack_ok"))
+    tf_ema_disp = ("D✓" if d_st else "D—") + " " + ("W✓" if w_st else "W—")
+    e9d, e21d = d.get("ema9_d"), d.get("ema21_d")
+    e9w, e21w = d.get("ema9_w"), d.get("ema21_w")
+    ema_d_str = (
+        f"{float(e9d):.1f}>{float(e21d):.1f}"
+        if e9d is not None and e21d is not None
+        else "—"
+    )
+    ema_w_str = (
+        f"{float(e9w):.1f}>{float(e21w):.1f}"
+        if e9w is not None and e21w is not None
+        else "—"
+    )
+    ema_stack_tooltip = f"{ema_d_str} | {ema_w_str}"
     sp = d.get("stop_price")
     stop_disp = f"{float(sp):.2f}" if sp is not None else "—"
     if not settings.SIDECAR_UDAI_PINE:
@@ -959,7 +1110,9 @@ def format_ui_row(d):
         'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': chp_color,
         'rv': f"{rv:.2f}", 'rv_color': "#00FF00" if rv >= 1.5 else "#D1D1D1",
         'trend_text': "UP" if d.get('trend_up') else "DOWN", 'trend_color': "#00FF00" if d.get('trend_up') else "#FF3131",
-        'ema_str': f"{d.get('ema_f_val',0.0):.1f}/{d.get('ema_s_val',0.0):.1f}",
+        'ema_str': ema_d_str,
+        'ema_f_val': float(e9d) if e9d is not None else 0.0,
+        'ema_s_val': float(e21d) if e21d is not None else 0.0,
         'ema30': float(d.get("ema30", 0.0) or 0.0),
         'ema30_prev': float(d.get("ema30_prev", 0.0) or 0.0),
         'prev_close_num': float(d.get("prev_close", 0.0) or 0.0),
@@ -973,6 +1126,12 @@ def format_ui_row(d):
         'mrs_rcvr_str': f"{float(d.get('mrs_rcvr_slope', 0.0)):+.3f}" + (" ↑SIG" if bool(d.get("mrs_rcvr", False)) else ""),
         'mrs_rcvr_color': "#00FFAA" if float(d.get("mrs_rcvr_slope", 0.0)) > 0 else "#555555",
         'brk_lvl': brk_disp,
+        'brk_lvl_w': brk_w_disp,
+        'tf_ema': tf_ema_disp,
+        'ema_d_str': ema_d_str,
+        'ema_w_str': ema_w_str,
+        'ema_stack_tooltip': ema_stack_tooltip,
+        'dual_tf_ema_stack_ok': bool(d.get("dual_tf_ema_stack_ok")),
         'stop_price': stop_disp,
         'udai_ui': udai_disp,
         'm_rsi2_ui': mrsi_ui,
