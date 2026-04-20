@@ -62,6 +62,8 @@ class State(rx.State):
             self.benchmark_name = "Nifty 50"
             self.benchmark = DASHBOARD_BENCHMARK_MAP["Nifty 50"]
             get_scanner().update_params(benchmark=self.benchmark)
+        if self.grid_sort_key in ("canslim_score", "cs", "canslim"):
+            self.grid_sort_key = "rs_rating"
         yield State.poll_results
     def set_universe(self, u):
         # Breakout engine syncs when opening /breakout (avoid heavy reset + races from main page).
@@ -117,7 +119,10 @@ class State(rx.State):
         self.filter_profile = p
         loaded = self._main_profile_prefs_dict().get(p)
         if isinstance(loaded, dict):
-            self.grid_sort_key = str(loaded.get("sort_key", "rs_rating"))
+            sk = str(loaded.get("sort_key", "rs_rating"))
+            if sk in ("canslim_score", "cs", "canslim"):
+                sk = "rs_rating"
+            self.grid_sort_key = sk
             self.grid_sort_desc = bool(loaded.get("sort_desc", True))
             self.filter_status = str(loaded.get("filter_status", "ALL"))
             self.filter_mrs = str(loaded.get("filter_mrs", "ALL"))
@@ -169,7 +174,6 @@ class State(rx.State):
             "Profile": "profile",
             "BRK": "brk_lvl",
             "A/D": "ad_grade",
-            "CS": "canslim_score",
         }
         key = m.get(str(label or "").strip(), "rs_rating")
         if self.grid_sort_key == key:
@@ -257,12 +261,6 @@ class State(rx.State):
         return "▼" if self.grid_sort_desc else "▲"
 
     @rx.var
-    def grid_sort_arrow_canslim(self) -> str:
-        if self.grid_sort_key != "canslim_score":
-            return ""
-        return "▼" if self.grid_sort_desc else "▲"
-
-    @rx.var
     def grid_sort_arrow_profile(self) -> str:
         if self.grid_sort_key != "profile":
             return ""
@@ -291,7 +289,6 @@ class State(rx.State):
             "profile": "Profile",
             "brk_lvl": "BRK",
             "ad_grade": "A/D",
-            "canslim_score": "CS",
         }
         return rev.get(self.grid_sort_key, "RS")
 
@@ -348,20 +345,6 @@ class State(rx.State):
         if not s:
             return rx.redirect("/events")
         return rx.redirect(f"/events?symbol={quote(s, safe=':-_')}")
-
-    def announcement_snapshot_alert(self, symbol: str, ann_dt: str, ann_desc: str):
-        """Show latest announcement snapshot in main dashboard (no page navigation)."""
-        s = str(symbol or "").strip().upper() or "—"
-        when = str(ann_dt or "").strip() or "—"
-        desc = str(ann_desc or "").strip() or "No details"
-        msg = (
-            "Latest announcement (snapshot)\n\n"
-            f"{s}\n"
-            f"Time: {when}\n"
-            f"Subject: {desc}\n\n"
-            "Tip: use 'an' again to re-check after next sync."
-        )
-        return rx.window_alert(msg)
 
     def scanner_snapshot_alert(
         self,

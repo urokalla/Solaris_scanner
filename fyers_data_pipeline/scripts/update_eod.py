@@ -50,6 +50,7 @@ def main():
         return
 
     db = DatabaseManager()
+    db.ensure_symbols_pipeline_columns()
     pq_manager = ParquetManager()
     
     with db.Session() as session:

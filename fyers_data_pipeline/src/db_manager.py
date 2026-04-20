@@ -1,6 +1,6 @@
 import os
 import logging
-from sqlalchemy import create_engine, MetaData, Table, Column, String, TIMESTAMP, Boolean, ForeignKey
+from sqlalchemy import create_engine, MetaData, Table, Column, String, TIMESTAMP, Boolean, ForeignKey, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
@@ -56,6 +56,18 @@ class DatabaseManager:
         self.Session = sessionmaker(bind=self.engine)
         self.metadata = MetaData()
 
+    def ensure_symbols_pipeline_columns(self) -> None:
+        """
+        Idempotent DDL for columns expected by backfill / update_eod.
+        create_all() does not ALTER existing tables, so older DB volumes need this.
+        """
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE symbols ADD COLUMN IF NOT EXISTS last_historical_sync TIMESTAMP"
+                )
+            )
+
     def initialize_schema(self):
         """Standard Sovereign Schema: Ensures all layers have their target tables."""
         from sqlalchemy import Column, String, Float, Integer, Date, TIMESTAMP, Boolean, ForeignKey, UniqueConstraint
@@ -66,7 +78,8 @@ class DatabaseManager:
             Column('symbol_token', String),
             Column('description', String),
             Column('exchange', String),
-            Column('is_active', Boolean, default=True)
+            Column('is_active', Boolean, default=True),
+            Column('last_historical_sync', TIMESTAMP, nullable=True),
         )
         
         # Layer 2: Historical OHLCV (The missing 'prices' table)
@@ -112,6 +125,7 @@ class DatabaseManager:
         
         try:
             self.metadata.create_all(self.engine)
+            self.ensure_symbols_pipeline_columns()
             logger.info("📡 [DB] All Architecture-Blueprint tables initialized successfully.")
         except Exception as e:
             logger.error(f"❌ [DB] Schema initialization failed: {e}")

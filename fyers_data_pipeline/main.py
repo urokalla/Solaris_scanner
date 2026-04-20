@@ -8,7 +8,6 @@ import sys
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
-from src.connection_manager import ConnectionManager
 from src.utils import setup_logging
 
 logger = setup_logging("pipeline_service", "pipeline.log")
@@ -42,7 +41,7 @@ def _read_date_flag(name: str) -> str | None:
 def _write_date_flag(name: str, day: str) -> None:
     p = os.path.join(_state_dir(), name)
     with open(p, "w", encoding="utf-8") as f:
-        f.write(day)
+        f.write(day.strip() + "\n")
 
 
 def run_script(rel_path: str):
@@ -88,7 +87,6 @@ def _monthly_rsi2_snapshot_script_path() -> str | None:
 
 def main_loop():
     logger.info("📡 Sovereign Pipeline Service Started")
-    conn = ConnectionManager()
 
     eod_h = int(os.getenv("EOD_SYNC_IST_HOUR", "15"))
     eod_m = int(os.getenv("EOD_SYNC_IST_MINUTE", "45"))
@@ -152,8 +150,7 @@ def main_loop():
                     if run_script(os.path.join("scripts", "backfill.py")):
                         _write_date_flag(".backfill_last_ok_date", today_str)
 
-            if not conn.connect():
-                logger.error("🔑 Fyers Token Expired or Missing. Pipeline will retry in 1 minute.")
+            # Fyers auth: eod_sync / backfill load the token in their own subprocess (see ConnectionManager there).
 
             time.sleep(30)
 

@@ -19,6 +19,11 @@ from src.utils import setup_logging
 
 logger = setup_logging("eod_sync", "eod_sync.log")
 
+# Symbol scope (production default):
+# - Default: ``universe_members`` for ``EOD_UNIVERSE_ID`` (compose: ALL_NSE), only ``-EQ`` / ``-INDEX``.
+# - ``EOD_NIFTY500_ONLY=1``: universe forced to NIFTY_500.
+# - ``EOD_INDEX_ONLY=1``: all active ``-INDEX`` in ``symbols`` (no universe join); benchmarks still merged.
+
 IST = ZoneInfo("Asia/Kolkata")
 
 # Benchmarks (must match Fyers — Smallcap index is NIFTYSMLCAP100, not NIFTYSMALLCAP100)
@@ -61,6 +66,43 @@ def normalize_fyers_symbol(sym: str) -> str:
     if body.endswith("-EQ") and "_" in body:
         return "NSE:" + body.replace("_", "-")
     return s
+
+
+def _fetch_eod_symbol_ids(session) -> list[str]:
+    nifty500_only = os.environ.get("EOD_NIFTY500_ONLY", "").strip().lower() in ("1", "true", "yes")
+    index_only = os.environ.get("EOD_INDEX_ONLY", "").strip().lower() in ("1", "true", "yes")
+    universe_id = (os.environ.get("EOD_UNIVERSE_ID") or "ALL_NSE").strip() or "ALL_NSE"
+    if nifty500_only:
+        universe_id = "NIFTY_500"
+
+    kind_filter = (
+        "AND s.symbol_id LIKE '%-INDEX'"
+        if index_only
+        else "AND (s.symbol_id LIKE '%-EQ' OR s.symbol_id LIKE '%-INDEX')"
+    )
+
+    if index_only:
+        query = text(
+            f"""
+            SELECT s.symbol_id
+            FROM symbols s
+            WHERE s.is_active = TRUE
+            {kind_filter}
+            """
+        )
+        rows = session.execute(query).fetchall()
+    else:
+        query = text(
+            f"""
+            SELECT s.symbol_id
+            FROM symbols s
+            INNER JOIN universe_members um ON s.symbol_id = um.symbol_id AND um.universe_id = :uid
+            WHERE s.is_active = TRUE
+            {kind_filter}
+            """
+        )
+        rows = session.execute(query, {"uid": universe_id}).fetchall()
+    return [r[0] for r in rows]
 
 
 def _is_api_rejection(response: dict) -> bool:
@@ -143,16 +185,28 @@ def main():
     _default_hist = os.path.join(_root, 'data', 'historical')
     pq_manager = ParquetManager(storage_path=os.getenv('PIPELINE_DATA_DIR', _default_hist))
 
+    nifty500_only = os.environ.get("EOD_NIFTY500_ONLY", "").strip().lower() in ("1", "true", "yes")
+    index_only = os.environ.get("EOD_INDEX_ONLY", "").strip().lower() in ("1", "true", "yes")
+    eod_univ = (os.environ.get("EOD_UNIVERSE_ID") or "ALL_NSE").strip() or "ALL_NSE"
+    if nifty500_only:
+        eod_univ = "NIFTY_500"
+
     with db.Session() as session:
-        result = session.execute(text("SELECT symbol_id FROM symbols WHERE is_active = TRUE")).fetchall()
-        db_symbols = [r[0] for r in result]
+        db_symbols = _fetch_eod_symbol_ids(session)
 
     # Dedupe after normalization (DB may list MIDCAP100-INDEX while benchmarks use NIFTYMIDCAP100-INDEX)
     all_symbols = sorted({normalize_fyers_symbol(s) for s in (db_symbols + BENCHMARK_SYMBOLS)})
     total = len(all_symbols)
 
     logger.info(
-        f"📊 [EOD Sync] Start | symbols={total} (active DB={len(db_symbols)}, benchmarks={len(BENCHMARK_SYMBOLS)})"
+        "📊 [EOD Sync] Start | symbols=%s (DB=%s, benchmarks=%s) | universe=%s | "
+        "EOD_NIFTY500_ONLY=%s EOD_INDEX_ONLY=%s",
+        total,
+        len(db_symbols),
+        len(BENCHMARK_SYMBOLS),
+        eod_univ,
+        nifty500_only,
+        index_only,
     )
 
     counts = {APPENDED: 0, NO_TODAY_BAR: 0, NO_CANDLES: 0, NO_DATA: 0, REJECTED: 0, FAIL: 0}

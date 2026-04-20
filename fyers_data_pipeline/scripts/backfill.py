@@ -242,14 +242,14 @@ def main():
     index_only = os.environ.get("BACKFILL_INDEX_ONLY", "").strip().lower() in ("1", "true", "yes")
 
     db = DatabaseManager()
+    db.ensure_symbols_pipeline_columns()
     hist_root = os.getenv("PIPELINE_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data", "historical"))
     hist_root = os.path.abspath(hist_root)
     pq_manager = ParquetManager(storage_path=hist_root)
     
     with db.Session() as session:
-        # PROFESSIONAL FILTER: Only process real Stocks (-EQ) and Indices (-INDEX)
-        # This automatically skips 'mislabeled symbols' and Gold Bond/Debt noise.
-        # BACKFILL_INDEX_ONLY=1: benchmarks only (extend NIFTY* / FINNIFTY history without touching EQ).
+        # All active -EQ and -INDEX (same selection style as before index allowlist experiments).
+        # BACKFILL_INDEX_ONLY=1: benchmarks / indices only (-INDEX).
         today = datetime.now().date()
         sync_filter = (
             ""

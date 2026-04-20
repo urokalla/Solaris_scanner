@@ -50,8 +50,8 @@ services:
       - ./stock_scanner_sovereign/.env
     volumes:
       - ./fyers_data_pipeline:/app
+      # Token is included here — do not add a second bind for access_token.txt (Docker can leave a stale empty file).
       - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
-      - ./stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
     environment:
       - DB_HOST=db
       - HOME=/app
@@ -60,6 +60,10 @@ services:
       # EOD: append today’s 1D bar after NSE close (Mon–Fri), default first run after 15:45 IST
       - EOD_SYNC_IST_HOUR=15
       - EOD_SYNC_IST_MINUTE=45
+      # EOD: universe_members for EOD_UNIVERSE_ID (default ALL_NSE), only -EQ / -INDEX
+      - EOD_UNIVERSE_ID=${EOD_UNIVERSE_ID:-ALL_NSE}
+      - EOD_NIFTY500_ONLY=${EOD_NIFTY500_ONLY:-0}
+      - EOD_INDEX_ONLY=${EOD_INDEX_ONLY:-0}
       # monthly_rsi2_lt2_snapshot: run weekdays after this IST time (default 15:00 = ~pre-close)
       - MONTHLY_RSI2_SNAPSHOT_ENABLED=${MONTHLY_RSI2_SNAPSHOT_ENABLED:-1}
       - MONTHLY_RSI2_SNAPSHOT_IST_HOUR=${MONTHLY_RSI2_SNAPSHOT_IST_HOUR:-15}
@@ -90,7 +94,6 @@ services:
       - ./fyers_data_pipeline/data/historical:/app/data/historical
       # So scripts can import fyers_data_pipeline (e.g. backfill_missing_parquet.py)
       - ./fyers_data_pipeline:/app/fyers_data_pipeline:ro
-      - ./stock_scanner_sovereign/access_token.txt:/app/stock_scanner_sovereign/access_token.txt
     environment:
       - SHM_MASTER=true
       - PYTHONUNBUFFERED=1

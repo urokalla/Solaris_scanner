@@ -5,8 +5,15 @@ import json
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 from fyers_apiv3 import fyersModel
 from dotenv import load_dotenv
+
+
+def _ist_calendar_date_str() -> str:
+    """IST date for rolling daily API counters (Asia/Kolkata)."""
+    return datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
 
 
 def _normalize_access_token(raw: str) -> str:
@@ -179,6 +186,7 @@ class ConnectionManager:
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir, exist_ok=True)
         self.request_log_path = os.path.join(self.log_dir, "api_requests.txt")
+        self._request_day_marker_path = os.path.join(self.log_dir, "api_requests_ist_day.txt")
         self.max_daily_requests = 80000
 
     def _refresh_credentials_from_disk(self) -> None:
@@ -245,9 +253,28 @@ class ConnectionManager:
                 continue
         return None
 
+    def _rollover_api_request_count_if_new_ist_day(self) -> None:
+        """Reset api_requests.txt when the IST calendar day changes (counter file had no date before)."""
+        try:
+            today = _ist_calendar_date_str()
+            prev = ""
+            if os.path.isfile(self._request_day_marker_path):
+                with open(self._request_day_marker_path, encoding="utf-8") as f:
+                    prev = f.read().strip()
+            if prev == today:
+                return
+            with open(self._request_day_marker_path, "w", encoding="utf-8") as f:
+                f.write(today + "\n")
+            with open(self.request_log_path, "w", encoding="utf-8") as f:
+                f.write("0")
+            logger.info("API request counter reset for IST day %s (was %r)", today, prev or "unset")
+        except OSError as ex:
+            logger.debug("API request day rollover skipped: %s", ex)
+
     def _increment_request_count(self):
         """Persistent counter for API requests (Daily approx)."""
         with self._lock:
+            self._rollover_api_request_count_if_new_ist_day()
             count = 0
             if os.path.exists(self.request_log_path):
                 with open(self.request_log_path, 'r') as f:
@@ -262,6 +289,7 @@ class ConnectionManager:
 
     def get_request_count(self):
         """Returns the current recorded request count."""
+        self._rollover_api_request_count_if_new_ist_day()
         if not os.path.exists(self.request_log_path):
             return 0
         with open(self.request_log_path, 'r') as f:

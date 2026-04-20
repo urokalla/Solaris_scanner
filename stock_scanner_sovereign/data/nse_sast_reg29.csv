@@ -2,20 +2,20 @@ symbol,raw_company,raw_acquirerName,raw_promoterType,txn_type,raw_noOfShareAcq,r
 OSIAHYPER,Osia Hyper Retail Limited,Kavita Dhirendrakumar Chopra,Y,Sale,,2500000,17-Apr-2026 18:09
 OSIAHYPER,Osia Hyper Retail Limited,Dhirendrakumar Gautamkumar Chopra,Y,Sale,,6390392,17-Apr-2026 18:09
 SHAILY,Shaily Engineering Plastics Limited,"SMALLCAP World Fund, Inc.",N,Acquisition,983425,,17-Apr-2026 18:02
-SUDARSCHEM,Sudarshan Chemical Industries Limited,Rahul Pradeep Rathi,N,Sale,,786119,17-Apr-2026 18:00
 SUDARSCHEM,Sudarshan Chemical Industries Limited,Pradeep Ramwilas Rathi,N,Sale,,786119,17-Apr-2026 18:00
+SUDARSCHEM,Sudarshan Chemical Industries Limited,Rahul Pradeep Rathi,N,Sale,,786119,17-Apr-2026 18:00
 NAVINFLUOR,Navin Fluorine International Limited,Life Insurance Corporation of India,N,Sale,,1032341,17-Apr-2026 17:59
 OMAXE,Omaxe Limited,Guild Builders Private Limited,Y,Acquisition,0,,17-Apr-2026 17:59
 TIL,TIL Limited,TIL Global Private Ltd,Y,Acquisition,1209176,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Venkataraman Rajamani,Y,Acquisition,1315000,,17-Apr-2026 10:55
 5PAISA,5Paisa Capital Limited,Aditi Athavankar,Y,Acquisition,8000,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Madhu N Jain,Y,Acquisition,922508,,17-Apr-2026 10:55
+5PAISA,5Paisa Capital Limited,Venkataraman Rajamani,Y,Acquisition,1315000,,17-Apr-2026 10:55
+5PAISA,5Paisa Capital Limited,Aditi Avinash Athavankar (in the capacity as Trustee of Kalki Family Private Trust),Y,Acquisition,720000,,17-Apr-2026 10:55
 5PAISA,5Paisa Capital Limited,Orpheus Trading Private Limited,Y,Acquisition,225540,,17-Apr-2026 10:55
 5PAISA,5Paisa Capital Limited,Nirmal Bhanwarlal Jain,Y,Acquisition,3102544,,17-Apr-2026 10:55
 5PAISA,5Paisa Capital Limited,Ardent Impex Private Limited,Y,Acquisition,468429,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Aditi Avinash Athavankar (in the capacity as Trustee of Kalki Family Private Trust),Y,Acquisition,720000,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Harshita Nirmal Jain,Y,Acquisition,45195,,17-Apr-2026 10:55
 5PAISA,5Paisa Capital Limited,Mansukhlal Jain & Pritesh Mehta (in their capacity as Trustee of Nirmal Madhu Family Private Trust),Y,Acquisition,65059,,17-Apr-2026 10:55
+5PAISA,5Paisa Capital Limited,Harshita Nirmal Jain,Y,Acquisition,45195,,17-Apr-2026 10:55
+5PAISA,5Paisa Capital Limited,Madhu N Jain,Y,Acquisition,922508,,17-Apr-2026 10:55
 TIL,TIL Limited,TIL Global Private Ltd,Y,Acquisition,1209176,,17-Apr-2026 10:54
 HINDZINC,Hindustan Zinc Limited,AXIS TRUSTEE SERVICES LIMITED,N,Acquisition,0,,17-Apr-2026 10:51
 DPABHUSHAN,D. P. Abhushan Limited,Santosh Ratanlal Kataria HUF along with pac,Y,Acquisition,0,,17-Apr-2026 10:51
@@ -32,27 +32,13 @@ NEOGEN,Neogen Chemicals Limited,Axis Trustee Services Limited (ATSL) acting as P
 MBLINFRA,MBL Infrastructure Limited,Anjanee Kumar Lakhotia and entities forming part of Promoters & promoter Group,Y,Acquisition,1900000,,16-Apr-2026 10:47
 ELLEN,Ellenbarrie Industrial Gases Limited,"Motilal Oswal Balanced Advantage Fund, Motilal Oswal Nifty Microcap 250 Index Fund, Motilal Oswal Multi Cap Fund, Motilal Oswal Business Cycle Fund",N,Sale,,173385,16-Apr-2026 10:46
 VISASTEEL,Visa Steel Limited,VISA Industries Limited,Y,Acquisition,16500000,,16-Apr-2026 10:45
+HMAAGRO,Hma Agro Industries Limited,Zulfiqar Ahmad Qurashi,Y,Sale,,7141000,16-Apr-2026 10:45
+HMAAGRO,Hma Agro Industries Limited,Wajid Ahmed,Y,Sale,,7501630,16-Apr-2026 10:45
 HMAAGRO,Hma Agro Industries Limited,Mohammad Ashraf Qureshi,Y,Sale,,7141000,16-Apr-2026 10:45
 HMAAGRO,Hma Agro Industries Limited,Mohammad Mehmood Qureshi,Y,Sale,,7141000,16-Apr-2026 10:45
 HMAAGRO,Hma Agro Industries Limited,Gulzar Ahmad,Y,Sale,,4256543,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Wajid Ahmed,Y,Sale,,7501630,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Zulfiqar Ahmad Qurashi,Y,Sale,,7141000,16-Apr-2026 10:45
 SPICEJET,SPICEJET LTD,Authum Investment & Infrastructure Limited,N,Acquisition,23107588,,16-Apr-2026 10:44
 SEDEMAC,SEDEMAC Mechatronics Limited,360 ONE Alternates Asset Management Limited,N,Sale,,897861,16-Apr-2026 10:44
 DBSTOCKBRO,DB (International) Stock Brokers Limited,Roopam Financers Private Limited,N,Acquisition,713308,,16-Apr-2026 10:43
-DELHIVERY,Delhivery Limited,Nexus Opportunity Fund Limited,N,Sale,,3263046,16-Apr-2026 10:42
 DELHIVERY,Delhivery Limited,"Nexus Ventures III, Limited",N,Sale,,20736954,16-Apr-2026 10:42
-VARDMNPOLY,Vardhman Polytex Limited,Catalyst Trusteeship Limited acting as the debenture trustee on behalf of inter alia the holder/s of the Debentures.,N,Acquisition,206547910,,13-Apr-2026 14:43
-SHRIRAMFIN,Shriram Finance Limited,Mitsubishi UFJ Financial Group,N,Acquisition,471121055,,13-Apr-2026 14:42
-EMAMIREAL,Emami Realty Limited,Suraj Finvest Private Limited and Diwakar Finvest Private Limited,Y,Acquisition,8200000,,13-Apr-2026 14:41
-PVRINOX,PVR INOX Limited,HDFC Mutual Fund,N,Acquisition,2065280,,13-Apr-2026 14:40
-OSIAHYPER,Osia Hyper Retail Limited,Kavita DhirendraKumar Chopra,Y,Sale,,750000,13-Apr-2026 14:40
-OSIAHYPER,Osia Hyper Retail Limited,Dhirendrakumar Gautamkumar Chopra,Y,Sale,,10356294,13-Apr-2026 14:40
-ELGIEQUIP,Elgi Equipments Limited,"Pari Washington India Master Fund, Ltd.",N,Sale,,9440,13-Apr-2026 14:37
-NUVOCO,Nuvoco Vistas Corporation Limited,SBI Mutual fund under its Various Schemes,N,Sale,,37084,13-Apr-2026 14:37
-KIRIINDUS,Kiri Industries Limited,"Manishkumar P Kiri, Anupama Manishkumar Kiri, Arunaben Pravinbhai Kiri, Hemil Manishkumar Kiri",Y,Acquisition,5145446,,13-Apr-2026 14:36
-BONLON,Bonlon Industries Limited,Bon Lon Private Limited,Y,Acquisition,0,,13-Apr-2026 14:35
-SHRIRAMFIN,Shriram Finance Limited,GIC Private Limited (GIC) on account of Government of the Monetary Authority of Singapore (MAS),N,Sale,,0,13-Apr-2026 14:34
-SHRIRAMFIN,Shriram Finance Limited,GIC Private Limited (GIC) on account of Government of Singapore (GOS),N,Sale,,266269,13-Apr-2026 14:34
-SAMMAANCAP,Sammaan Capital Limited,"BlackRock, Inc. (on behalf of discretionary management clients)",N,Acquisition,0,,13-Apr-2026 14:31
-CMSINFO,CMS Info Systems Limited,ICICI Prudential Mutual Fund,N,Sale,,3378195,13-Apr-2026 14:30
+DELHIVERY,Delhivery Limited,Nexus Opportunity Fund Limited,N,Sale,,3263046,16-Apr-2026 10:42

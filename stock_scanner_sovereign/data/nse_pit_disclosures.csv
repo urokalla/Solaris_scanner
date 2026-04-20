@@ -1,9 +1,14 @@
 symbol,raw_company,raw_acqName,raw_personCategory,txn_type,raw_buyQuantity,raw_sellquantity,raw_buyValue,raw_sellValue,raw_secVal,raw_secAcq,raw_date
-CAMLINFINE,Camlin Fine Sciences Limited,Ashish Subhash Dandekar,Director,Pledge Revoke,0,0,0,0,83736000,800000,16-Apr-2026 16:54
-HGS,Hinduja Global Solutions Limited,Hinduja Group Ltd.,Promoters,Pledge Revoke,0,0,0,0,1849500000,4500000,16-Apr-2026 16:52
-SAIFL,Sameera Agro And Infra Limited,Satya Murthy Sivalenka,Promoters,-,0,0,0,0,-,,16-Apr-2026 15:55
-SAKHTISUG,Sakthi Sugars Limited,ABT INVESTMENTS (INDIA) PRIVATE LIMITED,Promoter Group,Pledge Revoke,0,0,0,0,116682000,6439394,16-Apr-2026 15:12
-AFFLE,Affle 3i Limited,Kapil Mohan Bhutani,Key Managerial Personnel,Buy,0,0,0,0,0,0,16-Apr-2026 11:35
-JSWENERGY,JSW Energy Limited,JSW Energy Employees Welfare Trust,Other,Buy,0,0,0,0,0,1222,16-Apr-2026 10:58
-360ONE,360 ONE WAM LIMITED,RONAK RAMESH SHETH,Employees/Designated Employees,Pledge,0,0,0,0,9717000,10000,15-Apr-2026 22:58
-DESTINY,Destiny Logistics & Infra Limited,JUGAL KISHORE BHAGAT,Promoters,Buy,0,0,0,0,34798500,1054500,15-Apr-2026 10:57
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,1240101,1009,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,248856,214,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,27332,25,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,21900,20,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,300637,293,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,50199,50,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,50494,50,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,96800,100,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,96060,98,20-Apr-2026 12:04
+DPABHUSHAN,D. P. Abhushan Limited,Santosh Ratanlal Kataria HUF,Promoter Group,Sell,0,0,0,0,0,200000,18-Apr-2026 16:02
+DPABHUSHAN,D. P. Abhushan Limited,Santosh Kataria,Promoters,Buy,0,0,0,0,0,200000,18-Apr-2026 16:02
+DPABHUSHAN,D. P. Abhushan Limited,Vikas Ratanlal Kataria HUF,Promoter Group,Sell,0,0,0,0,0,200000,18-Apr-2026 16:02
+DPABHUSHAN,D. P. Abhushan Limited,Vikas Kataria,Promoters,Buy,0,0,0,0,0,200000,18-Apr-2026 16:02

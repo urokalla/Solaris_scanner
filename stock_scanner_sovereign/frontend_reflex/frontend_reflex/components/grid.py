@@ -32,7 +32,7 @@ def _col_style(width: str, ellipsis: bool = True) -> dict:
 
 # Fixed widths for every column (table-layout:fixed). Percentages sum to 100% so no stray “air” in one column.
 _COL = {
-    "ticker": _col_style("17%"),
+    "ticker": _col_style("18%"),
     "price": _col_style("7%"),
     "chg": _col_style("5%"),
     "rt": _col_style("5%"),
@@ -43,11 +43,9 @@ _COL = {
     "rvol": _col_style("6%"),
     "wrsi2": _col_style("6%"),
     "ad": _col_style("5%"),
-    "cs": _col_style("7%"),
     "brk": _col_style("5%"),
     "prf": _col_style("5%"),
-    "rcvr": _col_style("4%"),
-    "status": _col_style("12%"),
+    "status": _col_style("15%"),
 }
 
 
@@ -116,7 +114,6 @@ def data_grid():
                         "RVOL",
                         "W_RSI2",
                         "A/D",
-                        "CS",
                         "CHG%",
                         "LTP",
                         "Ticker",
@@ -325,18 +322,6 @@ def data_grid():
                     ),
                     rx.table.column_header_cell(
                         rx.hstack(
-                            rx.text("CS", color="white"),
-                            rx.text(State.grid_sort_arrow_canslim, color="#FFB000", font_size="9px"),
-                            spacing="1",
-                            align_items="center",
-                            cursor="pointer",
-                            on_click=lambda: State.toggle_grid_sort("canslim_score"),
-                        ),
-                        **_TH,
-                        **_COL["cs"],
-                    ),
-                    rx.table.column_header_cell(
-                        rx.hstack(
                             rx.text("BRK", color="white"),
                             rx.text(State.grid_sort_arrow_brk, color="#FFB000", font_size="9px"),
                             spacing="1",
@@ -401,31 +386,6 @@ def data_grid():
                                     title="Screener.in — P/E, ROE, results, debt",
                                     _hover={"text_decoration": "underline"},
                                     on_click=State.open_screener_in(r["symbol"]),
-                                ),
-                                rx.cond(
-                                    r["ann_has"],
-                                    rx.text(
-                                        "an",
-                                        font_size="9px",
-                                        color="#7CFC00",
-                                        font_weight="bold",
-                                        cursor="pointer",
-                                        flex_shrink="0",
-                                        title=r["ann_dt"],
-                                        _hover={"text_decoration": "underline"},
-                                        on_click=State.announcement_snapshot_alert(
-                                            r["symbol"], r["ann_dt"], r["ann_desc"]
-                                        ),
-                                    ),
-                                    rx.text(
-                                        "an",
-                                        font_size="9px",
-                                        color="#555555",
-                                        font_weight="normal",
-                                        cursor="default",
-                                        flex_shrink="0",
-                                        title="No recent announcement",
-                                    ),
                                 ),
                                 rx.text(
                                     "i",
@@ -555,31 +515,6 @@ def data_grid():
                             ),
                             **_TD,
                             **_COL["ad"],
-                        ),
-                        rx.table.cell(
-                            rx.text(
-                                r["canslim_cell"],
-                                font_size="10px",
-                                color=rx.cond(
-                                    r["canslim_band"] == "strong",
-                                    "#00FF00",
-                                    rx.cond(
-                                        r["canslim_band"] == "good",
-                                        "#7CFC00",
-                                        rx.cond(
-                                            r["canslim_band"] == "track",
-                                            "#FFB000",
-                                            "#888888",
-                                        ),
-                                    ),
-                                ),
-                                title=r["canslim_tip"],
-                                overflow="hidden",
-                                text_overflow="ellipsis",
-                                white_space="nowrap",
-                            ),
-                            **_TD,
-                            **_COL["cs"],
                         ),
                         rx.table.cell(
                             rx.text(r["brk_lvl_str"], title=r["brk_lvl_str"]),

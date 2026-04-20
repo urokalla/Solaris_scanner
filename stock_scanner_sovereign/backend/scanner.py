@@ -124,6 +124,26 @@ def _tick_session_volume(m) -> float:
     return 0.0
 
 
+def _tick_ltp_from_message(m: dict) -> Optional[float]:
+    """
+    Best-effort last price from a Fyers tick dict.
+    SymbolUpdate / v3 samples often use ``ltp``; other paths use ``lp`` (see scanner_msg legacy).
+    """
+    if not isinstance(m, dict):
+        return None
+    for k in ("ltp", "lp", "last_price"):
+        v = m.get(k)
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+            if np.isfinite(fv) and fv > 0:
+                return fv
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 try:
@@ -1996,18 +2016,20 @@ class MasterScanner:
         Fyers fires at high frequency; never let mRS/RVOL/profile failures drop LTP + CHG%.
         """
         try:
+            # SDK sometimes delivers a batch list instead of a single dict.
+            if isinstance(m, list):
+                for item in m:
+                    if isinstance(item, dict):
+                        self.on_tick(item)
+                return
             if not isinstance(m, dict):
                 return
             sym = m.get("symbol")
             if isinstance(sym, bytes):
                 sym = sym.decode("utf-8", errors="ignore")
-            price = m.get("ltp")
+            fp = _tick_ltp_from_message(m)
             vol = _tick_session_volume(m)
-            if sym is None or (isinstance(sym, str) and not sym.strip()) or price is None:
-                return
-            try:
-                fp = float(price)
-            except (TypeError, ValueError):
+            if sym is None or (isinstance(sym, str) and not sym.strip()) or fp is None:
                 return
             if not getattr(self, "_logged_first_tick", False):
                 logger.info("First live tick received: symbol=%r ltp=%s", sym, fp)
