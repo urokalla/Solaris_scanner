@@ -1,8 +1,8 @@
-# Optimized for 12-Core / 8GB RAM System
-#
-# If the host fans spin / WSL dies: (1) Docker Desktop → Settings → Resources — lower CPUs & RAM.
-# (2) `docker compose stop pipeline` when you are not backfilling/EOD (scanner still runs).
-# (3) Never run `monitoring` profile on a small machine — cAdvisor is heavy.
+# Tuned for a typical dev Mac: ~16GB host RAM, Docker Desktop ~8GB / 5 CPUs.
+# Per-service mem_limit must fit INSIDE Docker’s RAM — raising Desktop RAM alone does not lift these caps.
+# Lite preset (scanner/sidecar/dashboard): heavy extras OFF by default — main RS grid (RS/mRS/RVOL/W_RSI2/BRK/…)
+# unchanged; breakout page has less detail until you re-enable flags in .env.example / compose.
+# If the VM thrashes: widen DASHBOARD_POLL_INTERVAL_SEC, shrink universe, or `docker compose stop pipeline`.
 #
 # Per-service `cpus` / `mem_limit` are enforced by `docker compose` (Compose spec); they cap storms.
 services:
@@ -50,13 +50,20 @@ services:
       - ./stock_scanner_sovereign/.env
     volumes:
       - ./fyers_data_pipeline:/app
-      # Token is included here — do not add a second bind for access_token.txt (Docker can leave a stale empty file).
+      # Repository code/config (directory mount — token file inside is naturally visible to the
+      # container; DO NOT also bind the single access_token.txt file here or macOS Docker will hit
+      # the stale-inode bug whenever the token is rewritten by auto_auth.py on the host).
       - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
     environment:
       - DB_HOST=db
       - HOME=/app
       - PYTHONPATH=/app/stock_scanner_sovereign
       - FYERS_ACCESS_TOKEN_PATH=/app/stock_scanner_sovereign/access_token.txt
+      # EOD / backoff behavior when the token is expired:
+      # - eod_sync exits cleanly (no stacktrace, no hard fail)
+      # - scheduler retries at most every EOD_TOKEN_RETRY_MINUTES (default 60) so logs stay quiet
+      # - the moment access_token.txt is overwritten on the host, the next tick runs immediately
+      - EOD_TOKEN_RETRY_MINUTES=${EOD_TOKEN_RETRY_MINUTES:-60}
       # EOD: append today’s 1D bar after NSE close (Mon–Fri), default first run after 15:45 IST
       - EOD_SYNC_IST_HOUR=15
       - EOD_SYNC_IST_MINUTE=45
@@ -64,6 +71,8 @@ services:
       - EOD_UNIVERSE_ID=${EOD_UNIVERSE_ID:-ALL_NSE}
       - EOD_NIFTY500_ONLY=${EOD_NIFTY500_ONLY:-0}
       - EOD_INDEX_ONLY=${EOD_INDEX_ONLY:-0}
+      # Gap-heal: refetch any missing interior session bars in the last N days (0 = disabled).
+      - EOD_HEAL_DAYS=${EOD_HEAL_DAYS:-30}
       # monthly_rsi2_lt2_snapshot: run weekdays after this IST time (default 15:00 = ~pre-close)
       - MONTHLY_RSI2_SNAPSHOT_ENABLED=${MONTHLY_RSI2_SNAPSHOT_ENABLED:-1}
       - MONTHLY_RSI2_SNAPSHOT_IST_HOUR=${MONTHLY_RSI2_SNAPSHOT_IST_HOUR:-15}
@@ -72,7 +81,7 @@ services:
       - BACKFILL_IST_HOUR=1
       - BACKFILL_IST_MINUTE=0
     cpus: "1.0"
-    mem_limit: 1536m
+    mem_limit: 1280m
     networks:
       - sovereign_net
 
@@ -104,9 +113,15 @@ services:
       # Full websocket feed includes vol_traded_today; lite mode has no volume (RVOL stays 0).
       - FYERS_WS_LITEMODE=false
       - PIPELINE_DATA_DIR=/app/data/historical
+      # Lite main grid: skip weekly mRS “recovery / Below0↑” math in the master scanner (saves CPU).
+      # Re-enable: MRS_RCVR_COMPUTE_ENABLED=1
+      - MRS_RCVR_COMPUTE_ENABLED=0
+      # Skip CANSLIM vector recompute + EPS/merge scoring (saves CPU; rows show 0/6 weak).
+      # Re-enable: CANSLIM_ENABLED=1
+      - CANSLIM_ENABLED=0
     working_dir: /app/stock_scanner_sovereign
     command: ["python3", "-m", "backend.scanner"]
-    cpus: "1.5"
+    cpus: "2.0"
     mem_limit: 2g
     networks:
       - sovereign_net
@@ -134,14 +149,37 @@ services:
       - HOME=/app/stock_scanner_sovereign
       - PYTHONPATH=/app/stock_scanner_sovereign
       - PIPELINE_DATA_DIR=/app/fyers_data_pipeline/data/historical
-      - SIDECAR_UDAI_PINE=${SIDECAR_UDAI_PINE:-1}
-      # Breakout loop default was 0.5s (~constant CPU); 1.25s cuts load; raise if you need snappier BRK columns.
-      - SIDECAR_LOOP_SLEEP_SEC=${SIDECAR_LOOP_SLEEP_SEC:-1.25}
-      - SIDECAR_SYNC_WORKERS=${SIDECAR_SYNC_WORKERS:-6}
+      # Sidecar is the OWNER of the heavy BreakoutScanner loop (cycle replay, EMA30, brk_lvl
+      # Postgres writes). The dashboard container runs in "lazy mode" (DASHBOARD_BREAKOUT_LOOP=0)
+      # and only hydrates visible rows on demand via get_ui_view — this keeps the dashboard CPU
+      # free for Reflex while the sidecar's 1 CPU allocation actually gets used.
+      - SIDECAR_RUN_ANALYZER=1
+      # Heavy per-symbol helpers stay OFF — they feed main-RS-grid columns (mrs_rcvr / stage1_box /
+      # m_rsi2 / pre-thrust / Udai Pine) that the UI never renders in this setup.
+      - SIDECAR_UDAI_PINE=0
+      - SIDECAR_RVCR_ENABLED=0
+      - SIDECAR_M_RSI2=0
+      - SIDECAR_PRE_THRUST_ENABLED=0
+      - SIDECAR_STAGE1_BOX_ENABLED=0
+      # Per-tick EMA / signal-line compute that feeds fields NOT rendered by the current breakout
+      # grids. Cuts ~5× 900-bar EMA passes per task and the MRS signal-line deque maintenance —
+      # ~15-25% of the sidecar's main loop CPU. Re-enable any flag if you bring back the
+      # corresponding column (ema_d_str / ema_w_str / tf_ema / "BUY NOW" mRS-cross label).
+      - SIDECAR_EMA30_ENABLED=${SIDECAR_EMA30_ENABLED:-0}
+      - SIDECAR_EMA_STACK_ENABLED=${SIDECAR_EMA_STACK_ENABLED:-0}
+      - SIDECAR_MRS_SIGNAL_ENABLED=${SIDECAR_MRS_SIGNAL_ENABLED:-0}
+      # Pace the main loop: cycle tags only change on bar close, so sub-second refresh is wasted CPU.
+      - SIDECAR_LOOP_SLEEP_SEC=${SIDECAR_LOOP_SLEEP_SEC:-1.5}
+      - SIDECAR_SYNC_WORKERS=${SIDECAR_SYNC_WORKERS:-8}
+      - SIDECAR_MAX_TASKS_PER_LOOP=${SIDECAR_MAX_TASKS_PER_LOOP:-30}
+      # Udai Pine daily OHLCV refresh cadence (lower = closer to live Pine, higher = less CPU).
+      - UDAI_REFRESH_SEC=${UDAI_REFRESH_SEC:-25}
+      # Weekly RVCR recompute cache cadence.
+      - MRS_RVCR_WEEKLY_REFRESH_SEC=${MRS_RVCR_WEEKLY_REFRESH_SEC:-35}
     working_dir: /app/stock_scanner_sovereign
     command: ["python3", "sidecar.py"]
-    cpus: "0.5"
-    mem_limit: 768m
+    cpus: "1.0"
+    mem_limit: 896m
     networks:
       - sovereign_net
 
@@ -151,8 +189,10 @@ services:
       context: .
       dockerfile: stock_scanner_sovereign/frontend_reflex/Dockerfile
     container_name: sovereign_dashboard
-    restart: always
     user: "1000:1000"
+    # Dev Reflex: same proven setup as the original Dockerfile (hot reload; reliable WS + polling in Docker).
+    command: ["reflex", "run", "--env", "dev", "--backend-host", "0.0.0.0", "--loglevel", "info"]
+    restart: always
     depends_on:
       - scanner
     ports:
@@ -165,6 +205,8 @@ services:
       - ./fyers_data_pipeline/data/historical:/app/data/historical
     working_dir: /app/stock_scanner_sovereign/frontend_reflex
     environment:
+      # Must match how you open the UI in the browser (same host, port 8000 for Reflex backend WS).
+      - API_URL=${API_URL:-http://localhost:8000}
       - SHM_MASTER=false
       - PYTHONUNBUFFERED=1
       - DB_HOST=db
@@ -173,19 +215,29 @@ services:
       - HOME=/app/stock_scanner_sovereign
       # Must match volume …/historical:/app/data/historical so BreakoutScanner can read daily Parquet
       - PIPELINE_DATA_DIR=/app/data/historical
-      # Udai Pine column: set SIDECAR_UDAI_PINE=0 in .env to disable
-      - SIDECAR_UDAI_PINE=${SIDECAR_UDAI_PINE:-1}
-      # Main grid poll interval (default was 2.5s); 4s lowers Reflex + get_ui_view CPU a bit.
-      - DASHBOARD_POLL_INTERVAL_SEC=${DASHBOARD_POLL_INTERVAL_SEC:-4}
-    cpus: "0.8"
-    mem_limit: 1g
+      # Dashboard runs in LAZY breakout mode: the BreakoutScanner instance is kept only for
+      # get_ui_view (on-demand cycle hydration + SHM-refresh for visible rows). The heavy loop
+      # (cycle replay / EMA30 / brk_lvl DB writes) is owned by the sovereign_sidecar container
+      # via SIDECAR_RUN_ANALYZER=1. This frees the dashboard's 1 CPU for Reflex/web traffic.
+      - DASHBOARD_BREAKOUT_LOOP=${DASHBOARD_BREAKOUT_LOOP:-0}
+      - SIDECAR_UDAI_PINE=0
+      # Main grid poll interval (lower = fresher UI, higher = less load on host + sidecar).
+      - DASHBOARD_POLL_INTERVAL_SEC=${DASHBOARD_POLL_INTERVAL_SEC:-3.5}
+      # Universe load speed (sidecar pages): parallel parquet history fetch threads for the
+      # on-demand hydration path in get_ui_view. Reads are I/O bound (parquet file open + numpy
+      # decode), so more threads = faster hydration on universe switches.
+      - SIDECAR_SYNC_WORKERS=${SIDECAR_SYNC_WORKERS:-16}
+      - SIDECAR_HISTORY_RETRIES=${SIDECAR_HISTORY_RETRIES:-2}
+      - SIDECAR_HISTORY_RETRY_SLEEP=${SIDECAR_HISTORY_RETRY_SLEEP:-1.5}
+    cpus: "1.0"
+    mem_limit: 1536m
     networks:
       - sovereign_net
     deploy:
       resources:
         limits:
-          cpus: '0.8'
-          memory: 1G
+          cpus: '1.0'
+          memory: 1536M
     logging:
       driver: "json-file"
       options:

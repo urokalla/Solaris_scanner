@@ -8,6 +8,7 @@ Fetch NSE insider snapshots and write CSVs used by Insider page:
 from __future__ import annotations
 
 import csv
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,10 @@ PIT_COLS = [
     "raw_secVal",
     "raw_secAcq",
     "raw_date",
+    "first_seen_utc",
+    "last_refreshed_utc",
+    "fetched_at_utc",
+    "is_new",
 ]
 
 SAST_COLS = [
@@ -41,6 +46,10 @@ SAST_COLS = [
     "raw_noOfShareAcq",
     "raw_noOfShareSale",
     "raw_timestamp",
+    "first_seen_utc",
+    "last_refreshed_utc",
+    "fetched_at_utc",
+    "is_new",
 ]
 
 
@@ -78,18 +87,59 @@ def _write_csv(path: Path, cols: list[str], rows: list[dict]) -> None:
             w.writerow({c: r.get(c, "") for c in cols})
 
 
+def _read_existing_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with path.open("r", newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def _pit_key(r: dict) -> tuple[str, str, str]:
+    return (
+        str(r.get("symbol") or "").strip().upper(),
+        str(r.get("raw_date") or r.get("date") or "").strip(),
+        str(r.get("raw_acqName") or r.get("acqName") or "").strip(),
+    )
+
+
+def _sast_key(r: dict) -> tuple[str, str, str]:
+    return (
+        str(r.get("symbol") or "").strip().upper(),
+        str(r.get("raw_timestamp") or r.get("timestamp") or "").strip(),
+        str(r.get("raw_acquirerName") or r.get("acquirerName") or "").strip(),
+    )
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     data_dir = root / "data"
     pit_out = data_dir / "nse_pit_disclosures.csv"
     sast_out = data_dir / "nse_sast_reg29.csv"
+    fetched_at_utc = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     s = _session()
     pit_raw = _rows_from_payload(s.get(URL_PIT, timeout=30).json())
     sast_raw = _rows_from_payload(s.get(URL_SAST29, timeout=30).json())
 
-    pit_rows = [
-        {
+    existing_pit = _read_existing_rows(pit_out)
+    existing_sast = _read_existing_rows(sast_out)
+    pit_seen = {_pit_key(r): str(r.get("first_seen_utc") or r.get("fetched_at_utc") or "").strip() for r in existing_pit}
+    sast_seen = {_sast_key(r): str(r.get("first_seen_utc") or r.get("fetched_at_utc") or "").strip() for r in existing_sast}
+
+    prev_pit_keys = {_pit_key(r) for r in existing_pit}
+    prev_sast_keys = {_sast_key(r) for r in existing_sast}
+
+    pit_rows = []
+    for d in pit_raw:
+        if not str(d.get("symbol") or "").strip():
+            continue
+        k = (
+            str(d.get("symbol") or "").strip().upper(),
+            str(d.get("date") or "").strip(),
+            str(d.get("acqName") or "").strip(),
+        )
+        pit_rows.append(
+            {
             "symbol": str(d.get("symbol") or "").strip().upper(),
             "raw_company": d.get("company") or "",
             "raw_acqName": d.get("acqName") or "",
@@ -102,12 +152,27 @@ def main() -> int:
             "raw_secVal": d.get("secVal") or "",
             "raw_secAcq": d.get("secAcq") or "",
             "raw_date": d.get("date") or "",
+            "first_seen_utc": pit_seen.get(
+                k,
+                fetched_at_utc,
+            ),
+            "last_refreshed_utc": fetched_at_utc,
+            "fetched_at_utc": fetched_at_utc,
+            "is_new": "1" if k not in prev_pit_keys else "0",
         }
-        for d in pit_raw
-        if str(d.get("symbol") or "").strip()
-    ]
-    sast_rows = [
-        {
+        )
+
+    sast_rows = []
+    for d in sast_raw:
+        if not str(d.get("symbol") or "").strip():
+            continue
+        k = (
+            str(d.get("symbol") or "").strip().upper(),
+            str(d.get("timestamp") or "").strip(),
+            str(d.get("acquirerName") or "").strip(),
+        )
+        sast_rows.append(
+            {
             "symbol": str(d.get("symbol") or "").strip().upper(),
             "raw_company": d.get("company") or "",
             "raw_acquirerName": d.get("acquirerName") or "",
@@ -116,10 +181,15 @@ def main() -> int:
             "raw_noOfShareAcq": d.get("noOfShareAcq") if d.get("noOfShareAcq") is not None else "",
             "raw_noOfShareSale": d.get("noOfShareSale") if d.get("noOfShareSale") is not None else "",
             "raw_timestamp": d.get("timestamp") or "",
+            "first_seen_utc": sast_seen.get(
+                k,
+                fetched_at_utc,
+            ),
+            "last_refreshed_utc": fetched_at_utc,
+            "fetched_at_utc": fetched_at_utc,
+            "is_new": "1" if k not in prev_sast_keys else "0",
         }
-        for d in sast_raw
-        if str(d.get("symbol") or "").strip()
-    ]
+        )
 
     _write_csv(pit_out, PIT_COLS, pit_rows)
     _write_csv(sast_out, SAST_COLS, sast_rows)

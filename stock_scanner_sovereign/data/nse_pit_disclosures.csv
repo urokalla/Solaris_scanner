@@ -1,14 +1,15 @@
-symbol,raw_company,raw_acqName,raw_personCategory,txn_type,raw_buyQuantity,raw_sellquantity,raw_buyValue,raw_sellValue,raw_secVal,raw_secAcq,raw_date
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,1240101,1009,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,248856,214,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,27332,25,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,21900,20,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,300637,293,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,50199,50,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,50494,50,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,96800,100,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Mayank Ghota,Promoter Group,Buy,0,0,0,0,96060,98,20-Apr-2026 12:04
-DPABHUSHAN,D. P. Abhushan Limited,Santosh Ratanlal Kataria HUF,Promoter Group,Sell,0,0,0,0,0,200000,18-Apr-2026 16:02
-DPABHUSHAN,D. P. Abhushan Limited,Santosh Kataria,Promoters,Buy,0,0,0,0,0,200000,18-Apr-2026 16:02
-DPABHUSHAN,D. P. Abhushan Limited,Vikas Ratanlal Kataria HUF,Promoter Group,Sell,0,0,0,0,0,200000,18-Apr-2026 16:02
-DPABHUSHAN,D. P. Abhushan Limited,Vikas Kataria,Promoters,Buy,0,0,0,0,0,200000,18-Apr-2026 16:02
+symbol,raw_company,raw_acqName,raw_personCategory,txn_type,raw_buyQuantity,raw_sellquantity,raw_buyValue,raw_sellValue,raw_secVal,raw_secAcq,raw_date,first_seen_utc,last_refreshed_utc,fetched_at_utc,is_new
+PKTEA,The Peria Karamalai Tea & Produce Company Limited,Maharaja Shree Umaid Mills Ltd,Promoter Group,Buy,0,0,0,0,0,1220606,25-Apr-2026 22:10,2026-04-25 16:42:59 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+PKTEA,The Peria Karamalai Tea & Produce Company Limited,PLACID LIMITED,Promoter Group,Sell,0,0,0,0,0,1220606,25-Apr-2026 22:10,2026-04-25 16:42:59 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+SAIFL,Sameera Agro And Infra Limited,Satya Murthy Sivalenka,Promoters,Sell,0,0,0,0,15369600,1601000,25-Apr-2026 16:32,2026-04-25 11:03:45 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+PARIN,Parin Enterprises Limited,P.P. FURNITURE  PRIVATE LIMITED,Promoter Group,Sell,0,0,0,0,5630670,9000,25-Apr-2026 15:24,2026-04-25 09:55:13 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+MGEL,Mangalam Global Enterprise Limited,Vasrsha Biswajit Adhikari,Director,Buy,0,0,0,0,104400,10000,24-Apr-2026 17:28,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+WIPRO,Wipro Limited,Amit Kumar,Employees/Designated Employees,Sell,0,0,0,0,59912261,301829,24-Apr-2026 17:13,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+OMAXE,Omaxe Limited,Guild Builders Private Limited,Promoters,Pledge,0,0,0,0,352577990,35257799,24-Apr-2026 17:08,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+PARIN,Parin Enterprises Limited,P.P. FURNITURE  PRIVATE LIMITED,Promoter Group,Sell,0,0,0,0,8458940,14000,24-Apr-2026 16:29,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+PARIN,Parin Enterprises Limited,P.P. FURNITURE  PRIVATE LIMITED,Promoter Group,Sell,0,0,0,0,5042730,8250,24-Apr-2026 16:29,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JMFINANCIL,JM Financial Limited,Pratik Rokade,Employees/Designated Employees,Buy,0,0,0,0,2245284,16920,24-Apr-2026 13:09,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JMFINANCIL,JM Financial Limited,Rushank Jain,Employees/Designated Employees,Buy,0,0,0,0,2245284,16920,24-Apr-2026 13:09,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JMFINANCIL,JM Financial Limited,Venugopal Nyalapelli,Employees/Designated Employees,Buy,0,0,0,0,1294887,9758,24-Apr-2026 13:09,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JMFINANCIL,JM Financial Limited,Krishna Rao,Employees/Designated Employees,Buy,0,0,0,0,1818919,13707,24-Apr-2026 13:09,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JMFINANCIL,JM Financial Limited,Devan Kampani,Employees/Designated Employees,Buy,0,0,0,0,4237907,31936,24-Apr-2026 13:09,2026-04-24 15:31:02 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0

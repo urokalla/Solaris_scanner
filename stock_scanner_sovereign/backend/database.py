@@ -37,6 +37,7 @@ class DatabaseManager:
     _pool = None
     _brk_lvl_column_checked = False
     _mrs_prev_day_column_checked = False
+    _mrs_0_cross_unix_column_checked = False
     _rs_prev_day_column_checked = False
     _w_rsi2_column_checked = False
 
@@ -260,6 +261,135 @@ class DatabaseManager:
         except Exception as e:
             logger.warning("Database: get_brk_lvl_map failed: %s", e)
             return {}
+
+    def ensure_live_state_mrs_0_cross_unix_column(self):
+        """Unix time of last weekly mRS cross above 0 (master writes; dashboard reads)."""
+        if DatabaseManager._mrs_0_cross_unix_column_checked:
+            return
+        try:
+            self.ensure_live_state_table()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'live_state' AND column_name = 'mrs_0_cross_unix'
+                        """
+                    )
+                    if cur.fetchone() is None:
+                        cur.execute("ALTER TABLE live_state ADD COLUMN mrs_0_cross_unix DOUBLE PRECISION")
+                        conn.commit()
+                        logger.info("Database: added live_state.mrs_0_cross_unix")
+            DatabaseManager._mrs_0_cross_unix_column_checked = True
+        except Exception as e:
+            logger.warning("Database: ensure_live_state_mrs_0_cross_unix_column: %s", e)
+
+    def upsert_mrs_0_cross_unix(self, symbol: str, unix_ts: float) -> None:
+        """Record last mRS>0 cross-up instant (master only; advisory-locked vs other live_state writers)."""
+        if not symbol or not np.isfinite(unix_ts) or float(unix_ts) <= 0:
+            return
+        self.ensure_live_state_mrs_0_cross_unix_column()
+        sym = str(symbol).strip()
+        ts = float(unix_ts)
+        for attempt in range(5):
+            try:
+                with self.get_connection() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            acquire_live_state_xact_lock(cur)
+                            cur.execute(
+                                """
+                                INSERT INTO live_state AS ls (symbol, mrs_0_cross_unix) VALUES (%s, %s)
+                                ON CONFLICT (symbol) DO UPDATE SET
+                                    mrs_0_cross_unix = GREATEST(
+                                        COALESCE(ls.mrs_0_cross_unix, 0),
+                                        EXCLUDED.mrs_0_cross_unix
+                                    )
+                                """,
+                                (sym, ts),
+                            )
+                        conn.commit()
+                        return
+                    except Exception:
+                        try:
+                            if conn is not None and getattr(conn, "closed", 1) == 0:
+                                conn.rollback()
+                        except Exception:
+                            pass
+                        raise
+            except Exception as e:
+                emsg = str(e).lower()
+                is_conn_drop = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)) or (
+                    "connection already closed" in emsg or "server closed the connection" in emsg
+                )
+                if (_is_deadlock_exception(e) or is_conn_drop) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                logger.warning("Database: upsert_mrs_0_cross_unix failed: %s", e, exc_info=True)
+                return
+
+    def get_mrs_0_cross_unix_map(self, symbols):
+        """Return {symbol: unix_ts} for RS_0_CROSS_AGE on dashboard (SHM slave has no in-memory cross dict)."""
+        if not symbols:
+            return {}
+        self.ensure_live_state_mrs_0_cross_unix_column()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT symbol, mrs_0_cross_unix FROM live_state WHERE symbol IN %s AND mrs_0_cross_unix IS NOT NULL",
+                        (tuple(symbols),),
+                    )
+                    return {r[0]: float(r[1]) for r in cur.fetchall()}
+        except Exception as e:
+            logger.warning("Database: get_mrs_0_cross_unix_map failed: %s", e)
+            return {}
+
+    def upsert_mrs_0_cross_unix_fill_if_null_batch(self, rows):
+        """
+        Seed mrs_0_cross_unix from weekly-history approximation when the column is still NULL.
+        Does not overwrite live tick–refined timestamps (dashboard RS_0_CROSS_AGE for TRENDING names).
+        """
+        if not rows:
+            return
+        self.ensure_live_state_mrs_0_cross_unix_column()
+        payload = sorted(((str(s).strip(), float(ts)) for s, ts in rows if s and np.isfinite(ts) and float(ts) > 0), key=lambda x: x[0])
+        if not payload:
+            return
+        for attempt in range(5):
+            try:
+                with self.get_connection() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            acquire_live_state_xact_lock(cur)
+                            execute_values(
+                                cur,
+                                """
+                                INSERT INTO live_state AS ls (symbol, mrs_0_cross_unix) VALUES %s
+                                ON CONFLICT (symbol) DO UPDATE SET
+                                    mrs_0_cross_unix = COALESCE(ls.mrs_0_cross_unix, EXCLUDED.mrs_0_cross_unix)
+                                """,
+                                payload,
+                            )
+                        conn.commit()
+                        return
+                    except Exception:
+                        try:
+                            if conn is not None and getattr(conn, "closed", 1) == 0:
+                                conn.rollback()
+                        except Exception:
+                            pass
+                        raise
+            except Exception as e:
+                emsg = str(e).lower()
+                is_conn_drop = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)) or (
+                    "connection already closed" in emsg or "server closed the connection" in emsg
+                )
+                if (_is_deadlock_exception(e) or is_conn_drop) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                logger.warning("Database: upsert_mrs_0_cross_unix_fill_if_null_batch failed: %s", e, exc_info=True)
+                return
 
     def ensure_mrs_prev_day_column(self):
         """Prior session end-of-day weekly mRS (for TRENDING vs BUY latch rules on main grid)."""

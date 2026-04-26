@@ -1,24 +1,32 @@
-import time, os, logging
-from backend.breakout_engine import BreakoutScanner
+import os
+import time
 
 if __name__ == "__main__":
-    # The Sidecar is a SLAVE analyzer that writes signals back to SHM
+    # Full analyzer: BRK / EMA30 / breakout loop (heavy). Main RS grid does not need this — it uses
+    # MasterScanner SHM + DB merges. Set SIDECAR_RUN_ANALYZER=0 (see docker-compose) to keep the
+    # container alive with ~zero CPU. BRK column then stays stale or "—" unless you compute it elsewhere.
+    if os.getenv("SIDECAR_RUN_ANALYZER", "1").strip().lower() in ("0", "false", "no"):
+        print(
+            "💤 [Sidecar] SIDECAR_RUN_ANALYZER=0 — heavy loop disabled (no BRK/EMA30/breakout writes). "
+            "Main dashboard: master scanner only."
+        )
+        while True:
+            time.sleep(3600)
+        raise SystemExit(0)
+
+    from backend.breakout_engine import BreakoutScanner
+
     univ = os.getenv("UNIVERSE", "Nifty 500")
     print(f"🚀 [Sidecar] Initializing Pro Edition Analyzer for {univ}...")
-    
-    # 1. Initialize the heavy-duty scanner
+
     scanner = BreakoutScanner(universe=univ)
-    
-    # 2. Attach Pro Parameters (Signal Line, etc.)
-    # Note: These values are optimized for the Weinstein Pro logic
     scanner.update_params()
-    
-    # 3. Start the immortal analytical loop
+
     try:
         scanner.start_scanning()
         print("✅ [Sidecar] Real-time Analysis Loop Active.")
         while True:
-            time.sleep(10) # Keep thread alive while workers run
+            time.sleep(10)
     except KeyboardInterrupt:
         scanner.stop_scanning()
         print("🛑 [Sidecar] Analysis Stopped.")

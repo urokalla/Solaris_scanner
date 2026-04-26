@@ -5,6 +5,8 @@ from .components import sidebar, main_content
 from .engine import get_scanner
 from .breakout_page import breakout_page
 from .breakout_state import BreakoutState
+from .breakout_timing_page import breakout_timing_page
+from .breakout_timing_state import BreakoutTimingState
 from .events_page import events_page
 from .events_state import EventsState
 from .insider_page import insider_page
@@ -50,5 +52,11 @@ app = rx.App(
 )
 app.add_page(index, title="SOLARIS • RS SCANNER", on_load=State.on_load)
 app.add_page(breakout_page, route="/breakout", title="SIDECAR • BREAKOUT STRATEGY", on_load=BreakoutState.on_load)
+app.add_page(
+    breakout_timing_page,
+    route="/breakout-timing",
+    title="SIDECAR • BREAKOUT CLOCK",
+    on_load=BreakoutTimingState.on_load,
+)
 app.add_page(events_page, route="/events", title="SIDECAR • EVENTS", on_load=EventsState.on_load)
 app.add_page(insider_page, route="/insider", title="SIDECAR • INSIDER", on_load=InsiderState.on_load)

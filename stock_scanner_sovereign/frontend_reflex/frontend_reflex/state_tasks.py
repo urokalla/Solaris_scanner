@@ -17,6 +17,7 @@ async def poll_results_handler(self):
                 "status": self.filter_status,
                 "mrs_min": self.filter_mrs,
                 "rv_min": self.filter_rv,
+                "zero_cross_age": self.filter_cross_age,
                 "mrs_rcvr": self.filter_mrs_rcvr,
                 "sort_key": self.grid_sort_key,
                 "sort_desc": self.grid_sort_desc,

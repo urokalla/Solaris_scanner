@@ -1,0 +1,170 @@
+//@version=5
+// Built for **daily** charts: same cycle as udai_trend_python_parity + CB vs Donchian brk on-chart (no request.security on D).
+// On non-daily TF, brk comes from request.security("D",…) so the script still works if you switch timeframe.
+indicator("Daily — CB timing + EMA9/21 cycle", overlay=true, max_labels_count=500)
+
+grpCB = "CB timing (brk = Donchian high[1..len])"
+lenBrk  = input.int(10, "Donchian len (brk & cycle on D)", minval=2, group=grpCB)
+bCnt    = input.int(0, "B# seed for CB label (0 = internal only)", minval=0, group=grpCB)
+tz      = input.string("Asia/Kolkata", "Timezone", group=grpCB)
+
+grpCy = "Trend cycle (B / E9CT / ET9DNWF21C / E21C / RST)"
+ema9Len  = input.int(9, "EMA 9", group=grpCy)
+ema21Len = input.int(21, "EMA 21", group=grpCy)
+donLenCy = input.int(10, "Donchian len (non-daily charts only)", minval=2, group=grpCy, tooltip="Ignored on daily when “sync” is on.")
+syncDon  = input.bool(true, "Daily: use same Donchian len as brk", group=grpCy)
+rstN     = input.int(2, "RST: closes below EMA21", minval=1, group=grpCy)
+showCy   = input.bool(true, "Show cycle labels", group=grpCy)
+
+grpDs = "Display"
+showBrkPlot = input.bool(true, "Plot brk line", group=grpDs)
+showTbl     = input.bool(true, "Show status table", group=grpDs)
+
+tid = syminfo.prefix != "" ? syminfo.prefix + ":" + syminfo.ticker : syminfo.tickerid
+isD = timeframe.isdaily
+donEff = isD and syncDon ? lenBrk : donLenCy
+
+chartBrk() =>
+    ta.highest(nz(high[1], high), lenBrk)
+
+brk = isD ? chartBrk() : request.security(tid, "D", chartBrk(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+cbuy(n) =>
+    n <= 1 ? "CBBUY" : "CB" + str.tostring(n) + "BUY"
+
+var int cb = 0
+var string pendDay = ""
+var string pendTag = ""
+var string lastConf = ""
+var bool cutDone = false
+
+cb := math.max(cb, bCnt)
+
+dk = str.tostring(year(time, tz)) + "-" + str.tostring(month(time, tz), "00") + "-" + str.tostring(dayofmonth(time, tz), "00")
+newDay = bar_index > 0 and dk != dk[1]
+
+hc = hour(time_close, tz)
+mc = minute(time_close, tz)
+afterCutoffClose = hc > 15 or (hc == 15 and mc >= 30)
+
+price = close
+okBrk = not na(brk) and brk > 0
+
+// CB updates once per bar when the bar closes (matches EOD / app daily snapshot).
+barDone = barstate.isconfirmed
+
+if barDone
+    if newDay
+        cutDone := false
+
+    if newDay and pendDay != "" and pendDay != dk
+        if okBrk and price > brk
+            cb := cb + 1
+            lastConf := dk
+            label.new(bar_index, low, cbuy(cb) + " OK (roll)", style=label.style_label_up, color=color.new(color.teal, 0), textcolor=color.black, size=size.small)
+        pendDay := ""
+        pendTag := ""
+
+    if afterCutoffClose and not cutDone
+        cutDone := true
+        if pendDay == dk and pendTag != ""
+            if okBrk and price > brk
+                cb := cb + 1
+                lastConf := dk
+                label.new(bar_index, low, cbuy(cb) + " OK", style=label.style_label_up, color=color.new(color.teal, 0), textcolor=color.black, size=size.small)
+            pendDay := ""
+            pendTag := ""
+
+    if okBrk and price > brk and pendDay != dk and lastConf != dk
+        pendDay := dk
+        pendTag := cbuy(cb + 1)
+        label.new(bar_index, low, pendTag + " LIVE", style=label.style_label_up, color=color.new(color.blue, 0), textcolor=color.white, size=size.small)
+
+c_B    = #2E7D32
+c_E9CT = #1565C0
+c_ET9  = #E65100
+c_E21C = #6A1B9A
+c_RST  = #C62828
+
+ema9  = ta.ema(close, ema9Len)
+ema21 = ta.ema(close, ema21Len)
+
+donCurr = ta.highest(high[1], donEff)
+donPrev = ta.highest(high[2], donEff)
+
+var int state = 0
+var int bCount = 0
+var int e9tCount = 0
+var int e21cCount = 0
+var int below21 = 0
+
+TAG_ET9 = "ET9DNWF21C"
+confirmed = barstate.isconfirmed
+
+if showCy and confirmed
+    if close < ema21
+        below21 := below21 + 1
+    else
+        below21 := 0
+
+    if state > 0 and below21 >= rstN
+        label.new(bar_index, high, "RST", yloc=yloc.abovebar, color=c_RST, textcolor=color.white, style=label.style_label_down, size=size.small)
+        state := 0
+        bCount := 0
+        e9tCount := 0
+        e21cCount := 0
+    else
+        trendOk = close > ema9 and ema9 > ema21
+        isBreakout = trendOk and close > donCurr and close[1] <= donPrev
+
+        if isBreakout
+            state := 1
+            bCount := bCount + 1
+            bTxt = "B" + str.tostring(bCount)
+            if low <= ema9
+                bTxt := bTxt + "+E9CT"
+            label.new(bar_index, low, bTxt, yloc=yloc.belowbar, color=c_B, textcolor=color.white, style=label.style_label_up, size=size.small)
+        else if state > 0
+            if state == 1 and low < ema9 and close > ema9 and not isBreakout
+                e9tCount := e9tCount + 1
+                label.new(bar_index, low, "E9CT" + str.tostring(e9tCount), yloc=yloc.belowbar, color=c_E9CT, textcolor=color.white, style=label.style_label_up, size=size.small)
+            else if state == 1 and close < ema9
+                state := 2
+                label.new(bar_index, high, TAG_ET9, yloc=yloc.abovebar, color=c_ET9, textcolor=color.white, style=label.style_label_down, size=size.small)
+            else if state == 1 and not isBreakout and close >= ema9
+                if close[1] < ema21[1] and close > ema21
+                    e21cCount := e21cCount + 1
+                    label.new(bar_index, low, "E21C" + str.tostring(e21cCount), yloc=yloc.belowbar, color=c_E21C, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+            if state == 2 and close > ema9
+                state := 1
+                if close > ema21
+                    e21cCount := e21cCount + 1
+                    label.new(bar_index, low, "E21C" + str.tostring(e21cCount), yloc=yloc.belowbar, color=c_E21C, textcolor=color.white, style=label.style_label_up, size=size.small)
+                else
+                    e9tCount := e9tCount + 1
+                    label.new(bar_index, low, "E9CT" + str.tostring(e9tCount), yloc=yloc.belowbar, color=c_E9CT, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+plot(ema9, "EMA 9", color=color.new(c_E9CT, 25), linewidth=2)
+plot(ema21, "EMA 21", color=color.new(color.black, 0), linewidth=2)
+plot(showBrkPlot and okBrk ? brk : na, isD ? "brk (on-chart D)" : "brk (from D TF)", color=color.new(color.gray, 0), linewidth=2)
+plot(donCurr, "Donchian (cycle)", color=color.new(color.gray, 75), linewidth=1, style=plot.style_stepline)
+
+bgcolor(showCy ? (state == 1 ? color.new(c_B, 97) : state == 2 ? color.new(c_ET9, 97) : na) : na)
+
+var table t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 78))
+if showTbl and barstate.islast
+    table.cell(t, 0, 0, "TF", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 0, timeframe.period + (isD ? "" : " (!D)"), text_color=isD ? color.white : color.orange, text_size=size.small)
+    table.cell(t, 0, 1, "ticker", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 1, tid, text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 2, "brk", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 2, na(brk) ? "na" : str.tostring(brk, format.mintick), text_color=na(brk) ? color.red : color.white, text_size=size.small)
+    table.cell(t, 0, 3, "cycle", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 3, state == 0 ? "idle" : state == 1 ? "in trend" : "below E9", text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 4, "B / E9 / E21", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 4, str.tostring(bCount) + " / " + str.tostring(e9tCount) + " / " + str.tostring(e21cCount), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 5, "after 15:30?", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 5, afterCutoffClose ? "yes" : "no", text_color=afterCutoffClose ? color.orange : color.gray, text_size=size.small)
+    table.cell(t, 0, 6, "CB pending", text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 6, pendDay == dk ? pendTag : "-", text_color=color.aqua, text_size=size.small)

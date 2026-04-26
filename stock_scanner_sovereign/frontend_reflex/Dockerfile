@@ -39,5 +39,5 @@ RUN reflex init
 # Expose ports
 EXPOSE 3000 8000
 
-# Default command (Dev Mode for Hot-Reloading)
-CMD ["reflex", "run", "--env", "dev", "--backend-host", "0.0.0.0", "--loglevel", "debug"]
+# Default matches compose: dev in Docker is the known-good Reflex mode for this project.
+CMD ["reflex", "run", "--env", "dev", "--backend-host", "0.0.0.0", "--loglevel", "info"]

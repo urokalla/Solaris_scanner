@@ -7,6 +7,13 @@ def breakout_header():
             rx.vstack(
                 rx.text("SOLARIS • BREAKOUT STRATEGY", size="4", color="#00FF00", font_weight="bold"),
                 rx.text("ISOLATED SIDECAR ENGINE", size="1", color="#D1D1D1"),
+                rx.link(
+                    "Open Breakout clock (daily/weekly event times →)",
+                    href="/breakout-timing",
+                    color="#00E5FF",
+                    font_size="11px",
+                    padding_top="4px",
+                ),
                 align_items="start", spacing="0"
             ),
             rx.spacer(),
@@ -23,19 +30,19 @@ def breakout_header():
         ), spacing="0", width="100%"
     )
 def breakout_sidebar():
+    profile_options = ["ALL", "ELITE", "LEADER", "RISING", "LAGGARD", "FADING", "BASELINE"]
     brk_options = [
         "ALL",
-        "STAGE2_CONFIRMED",
-        "EMA30_PULLBACK_LT50_NO_SME",
-        "BUY NOW",
-        "BREAKOUT",
-        "NEAR BRK",
-        "STAGE 1",
-        "STAGE 2",
-        "STAGE 4",
-        "N.A.",
+        "LOCKED",
+        "TRENDING",
+        "PULLBACK",
+        "B",
+        "E9CT",
+        "ET9DNWF21C",
+        "E21C",
+        "RST",
     ]
-    mrs_grid_options = ["ALL", "BUY NOW", "TRENDING", "NOT TRENDING"]
+    mrs_grid_options = ["ALL", "TREND_OK"]
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
         rx.box(
@@ -63,6 +70,7 @@ def breakout_sidebar():
             rx.text("Symbol contains", size="1", color="#888888", padding_left="15px"),
             rx.input(
                 placeholder="e.g. RELIANCE",
+                value=BreakoutState.search_query,
                 on_change=BreakoutState.set_search_query,
                 size="1",
                 width="100%",
@@ -75,6 +83,30 @@ def breakout_sidebar():
                 height="32px",
                 font_size="12px",
                 _focus={"border_color": "#FFB000"},
+            ),
+            rx.text("PROFILE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+            rx.select(
+                profile_options,
+                value=BreakoutState.filter_profile,
+                on_change=BreakoutState.set_filter_profile,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                margin_left="15px",
+                margin_right="15px",
+                height="32px",
+            ),
+            rx.text(
+                "ELITE/LEADER: top RS leaders | RISING: improving trend | "
+                "LAGGARD: weak RS | FADING: losing momentum | BASELINE: neutral.",
+                size="1",
+                color="#777777",
+                padding_left="15px",
+                padding_right="15px",
+                white_space="normal",
             ),
             rx.text("BRK STAGE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
             rx.select(
@@ -91,7 +123,7 @@ def breakout_sidebar():
                 margin_right="15px",
                 height="32px",
             ),
-            rx.text("MRS STATUS (weekly)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+            rx.text("TREND FILTER", size="1", color="#888888", padding_top="8px", padding_left="15px"),
             rx.select(
                 mrs_grid_options,
                 value=BreakoutState.filter_mrs_grid,
@@ -106,9 +138,9 @@ def breakout_sidebar():
                 margin_right="15px",
                 height="32px",
             ),
-            rx.text("Mn RSI2 (month-end)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+            rx.text("LAST TAG PREFIX", size="1", color="#888888", padding_top="8px", padding_left="15px"),
             rx.select(
-                ["ALL", "LT2"],
+                ["ALL", "B", "E9CT", "ET9DNWF21C", "E21C", "RST"],
                 value=BreakoutState.filter_m_rsi2,
                 on_change=BreakoutState.set_filter_m_rsi2,
                 color="white",

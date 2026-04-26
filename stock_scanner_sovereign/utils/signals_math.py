@@ -86,6 +86,38 @@ def effective_pivot_window(n_bars: int, pivot_w: int) -> int | None:
     return max(1, w)
 
 
+def trim_series_after_corporate_action(
+    h: np.ndarray | None, drop_threshold: float = 0.60, up_threshold: float = 2.50
+) -> np.ndarray | None:
+    """
+    Trim price series to the most recent regime after a split/bonus-like jump.
+
+    We detect abrupt close-to-close jumps and keep bars after the latest event:
+    - large down jump (default <= -60%)
+    - large up jump   (default >= +250%)
+    """
+    if h is None or len(h) < 3:
+        return h
+    try:
+        c = np.asarray(h[:, 4], dtype=np.float64)
+    except Exception:
+        return h
+    if c.size < 3:
+        return h
+    prev = c[:-1]
+    curr = c[1:]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ret = (curr / prev) - 1.0
+    evt = np.where((ret <= -abs(drop_threshold)) | (ret >= abs(up_threshold)))[0]
+    if evt.size == 0:
+        return h
+    cut = int(evt[-1] + 1)
+    # Need enough bars for pivot calculations after trim.
+    if cut >= len(h) - 1:
+        return h
+    return h[cut:]
+
+
 def compute_mrs_signal_line(mrs_history, period: int) -> float:
     """SMA of the last ``period`` MRS samples; if fewer samples, use the last value."""
     if mrs_history is None:
@@ -129,11 +161,11 @@ def generate_breakout_signal(symbol, h, bench_h, params):
     h_raw = h
     h_daily = collapse_sidecar_buffer_to_daily_ohlc(h_raw) if h_raw is not None else None
     if h_daily is not None and len(h_daily) >= 2:
-        h = h_daily
+        h = trim_series_after_corporate_action(h_daily)
         # Today + pivot_w completed dailies is enough for a full pivot_w Donchian on ``h[:-1]``.
         min_need = max(pivot_w + 1, 15)
     else:
-        h = h_raw
+        h = trim_series_after_corporate_action(h_raw)
         min_need = min_bars
 
     # Provide basic status even if history is still syncing

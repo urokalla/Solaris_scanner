@@ -50,6 +50,35 @@ def weekly_mrs_asof_batch(
     return np.nan_to_num(((w_mrs - 1.0) * 10.0), nan=0.0).astype(np.float64)
 
 
+def weeks_since_last_mrs_zero_cross_up(trailing_weekly_mrs: np.ndarray) -> np.ndarray:
+    """
+    For each symbol row of trailing weekly mRS (oldest → newest, last col = live), estimate how many
+    week steps lie between the **most recent** upward cross through 0 and the live column.
+
+    Returns int32 ``>= 0`` when the live endpoint is above 0; ``-1`` when live mRS is not positive or
+    input is degenerate. If the series stays above 0 for the full window, returns ``K - 1``
+    (cross is at least that many weeks in the past — conservative for RS_0_CROSS_AGE seeding).
+    """
+    y = np.asarray(trailing_weekly_mrs, dtype=np.float64)
+    if y.ndim != 2 or y.shape[1] < 2:
+        return np.full(0, -1, dtype=np.int32)
+    n, k = y.shape
+    out = np.full(n, -1, dtype=np.int32)
+    for i in range(n):
+        row = y[i]
+        if not np.isfinite(row[-1]) or float(row[-1]) <= 0:
+            continue
+        last_t = -1
+        for t in range(1, k):
+            if float(row[t - 1]) <= 0.0 and float(row[t]) > 0.0:
+                last_t = t
+        if last_t < 0:
+            out[i] = int(k - 1)
+        else:
+            out[i] = int((k - 1) - last_t)
+    return out
+
+
 def weekly_mrs_trailing_series(
     price_matrix_w: np.ndarray,
     bench_prices_w: np.ndarray,

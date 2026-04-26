@@ -11,8 +11,8 @@ def update_engine_config_handler(self, form_data):
     self.timeframe = form_data.get("timeframe", "Daily")
     self.ema_fast = int(form_data.get("ema_fast", 9))
     self.ema_slow = int(form_data.get("ema_slow", 21))
-    # Must match config default BREAKOUT_PIVOT_HIGH_WINDOW (20); drives pivot for BRK_LVL.
-    self.breakout_period = int(form_data.get("brk_period", 20))
+    # Must match config default BREAKOUT_PIVOT_HIGH_WINDOW (10); drives pivot for BRK_LVL.
+    self.breakout_period = int(form_data.get("brk_period", 10))
     get_breakout_scanner().update_params(pivot_high_window=self.breakout_period)
     self.status_message = f"Re-Configuring {self.universe}..."
     return rx.toast(f"Engine Tuned: {self.timeframe} {self.ema_fast}/{self.ema_slow} pivot={self.breakout_period}")
@@ -46,6 +46,7 @@ def download_excel_handler(self):
                 "symbol": r.get("symbol"),
                 "ltp": r.get("ltp"),
                 "chp": r.get("chp"),
+                "rvol": r.get("rv"),
                 "brk_lvl": r.get("brk_lvl"),
                 "brk_lvl_w": r.get("brk_lvl_w"),
                 "tf_ema": r.get("tf_ema"),
@@ -64,6 +65,7 @@ def download_excel_handler(self):
         "SYMBOL",
         "PRICE",
         "CHG_PCT",
+        "RVOL",
         "BRK_LVL",
         "BRK_W",
         "TF_EMA",

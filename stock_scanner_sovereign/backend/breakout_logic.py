@@ -15,6 +15,7 @@ from utils.signals_math import (
     compute_mrs_signal_line,
     detect_pivot_high,
     effective_pivot_window,
+    trim_series_after_corporate_action,
 )
 from utils.monthly_rsi2_trade_rules import (
     blend_last_daily_bar_with_ltp,
@@ -25,6 +26,30 @@ from utils.monthly_rsi2_trade_rules import (
 
 LGR = logging.getLogger("Breakout")
 _IST = ZoneInfo("Asia/Kolkata")
+
+# User-facing LAST TAG strings (used in UI, filters, colors).
+# E9T{n} / +E9T and ETDN were renamed; internal counters still use e9t_count / e9t.
+TAG_ET9_WAIT_F21C = "ET9DNWF21C"  # close under EMA9, waiting for 21C path (was ETDN)
+
+
+def _tag_e9ct(n: int) -> str:
+    k = int(n)
+    return f"E9CT{k}"
+
+
+def _tag_power_e9ct(base: str) -> str:
+    """B1+… 'power bar' when low tagged EMA9 on the breakout bar."""
+    return f"{base}+E9CT"
+
+
+def _is_e9ct_tag(s: str) -> bool:
+    u = str(s or "").strip().upper()
+    return u.startswith("E9CT") or u.startswith("E9T")  # legacy E9T1
+
+
+def _is_et9dn_wait_tag(s: str) -> bool:
+    u = str(s or "").strip().upper()
+    return u == TAG_ET9_WAIT_F21C.upper() or u == "ETDN"
 
 def _weekly_close_map_from_ohlcv(h: np.ndarray) -> dict[tuple[int, int], float]:
     """
@@ -263,6 +288,439 @@ def _decode_shm_grid_status(raw) -> str:
     return s if s else "—"
 
 
+def _bar_date_key_from_ts(ts: float) -> str:
+    try:
+        d = datetime.fromtimestamp(float(ts), tz=_IST).date()
+        return d.isoformat()
+    except Exception:
+        return ""
+
+
+def _cbuy_tag(idx: int) -> str:
+    n = max(1, int(idx))
+    return "CBBUY" if n == 1 else f"CB{n}BUY"
+
+
+def _infer_b_count_from_tag(tag_val) -> int:
+    t = str(tag_val or "").strip().upper()
+    if not t.startswith("B"):
+        return 0
+    digits = []
+    for ch in t[1:]:
+        if ch.isdigit():
+            digits.append(ch)
+        else:
+            break
+    if not digits:
+        return 1
+    try:
+        return max(1, int("".join(digits)))
+    except Exception:
+        return 1
+
+
+def _timing_state_from_tag(tag_val: str, pending: bool) -> str:
+    t = str(tag_val or "").strip().upper()
+    if t.startswith("CB"):
+        return "LIVE BREAKOUT" if pending else "CONFIRMED BREAKOUT"
+    if t.startswith("B"):
+        # Bx+E9CT: breakout bar also tagged EMA9 on the same candle.
+        return "POST-BREAKOUT" if "+" in t else "CONFIRMED BREAKOUT"
+    if t == TAG_ET9_WAIT_F21C or t.startswith(("E9CT", "E21C", "RST")):
+        return "POST-BREAKOUT"
+    return "LOCKED"
+
+
+def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -> None:
+    """
+    Timing-only breakout tracker:
+    - Shows intraday breakout immediately on /breakout-timing (CBBUY/CB2BUY...).
+    - Finalizes or rolls back at 15:30 IST (daily) and Friday 15:30 IST (weekly).
+    """
+    now_ts = float(now_dt.timestamp())
+    today = now_dt.date().isoformat()
+    cutoff_reached = (now_dt.hour, now_dt.minute) >= (15, 30)
+    week_id = f"{int(now_dt.isocalendar().year)}-W{int(now_dt.isocalendar().week):02d}"
+    is_weekly_finalize_slot = now_dt.weekday() == 4 and cutoff_reached
+
+    # -------- Daily timing stream --------
+    d_brk = float(r.get("brk_lvl") or 0.0)
+    d_pending_day = str(r.get("cb_pending_day_d") or "")
+    d_pending_tag = str(r.get("cb_pending_tag_d") or "")
+    d_pending_ts = float(r.get("cb_pending_ts_d") or 0.0)
+    d_last_confirm_day = str(r.get("cb_last_confirm_day_d") or "")
+    confirmed_b_count_d = int(r.get("b_count", 0) or 0)
+    if confirmed_b_count_d <= 0:
+        confirmed_b_count_d = _infer_b_count_from_tag(r.get("last_tag"))
+    cb_count_d = int(r.get("cb_count_d", 0) or 0)
+    if cb_count_d < confirmed_b_count_d:
+        cb_count_d = confirmed_b_count_d
+        r["cb_count_d"] = cb_count_d
+
+    if d_brk > 0 and ltp > d_brk and d_pending_day != today and d_last_confirm_day != today:
+        d_pending_day = today
+        d_pending_tag = _cbuy_tag(max(cb_count_d, confirmed_b_count_d) + 1)
+        d_pending_ts = now_ts
+
+    if d_pending_day == today and cutoff_reached:
+        if d_brk > 0 and ltp > d_brk:
+            cb_count_d += 1
+            r["cb_count_d"] = cb_count_d
+            r["timing_last_tag"] = _cbuy_tag(cb_count_d)
+            r["timing_last_event_ts"] = now_ts
+            r["cb_last_confirm_day_d"] = today
+        d_pending_day = ""
+        d_pending_tag = ""
+        d_pending_ts = 0.0
+
+    if d_pending_day == today and d_pending_tag:
+        r["timing_last_tag"] = d_pending_tag
+        r["timing_last_event_ts"] = d_pending_ts if d_pending_ts > 0 else now_ts
+    else:
+        r.setdefault("timing_last_tag", str(r.get("last_tag") or "—"))
+        r.setdefault("timing_last_event_ts", float(r.get("last_event_ts", 0.0) or 0.0))
+        if not d_pending_day:
+            r["timing_last_tag"] = str(r.get("last_tag") or "—")
+            r["timing_last_event_ts"] = float(r.get("last_event_ts", 0.0) or 0.0)
+
+    r["cb_pending_day_d"] = d_pending_day
+    r["cb_pending_tag_d"] = d_pending_tag
+    r["cb_pending_ts_d"] = d_pending_ts
+
+    # -------- Weekly timing stream --------
+    w_brk = float(r.get("brk_lvl_w") or 0.0)
+    w_pending_week = str(r.get("cb_pending_week_w") or "")
+    w_pending_tag = str(r.get("cb_pending_tag_w") or "")
+    w_pending_ts = float(r.get("cb_pending_ts_w") or 0.0)
+    w_last_confirm_week = str(r.get("cb_last_confirm_week_w") or "")
+    confirmed_b_count_w = int(r.get("b_count_w", 0) or 0)
+    if confirmed_b_count_w <= 0:
+        confirmed_b_count_w = _infer_b_count_from_tag(r.get("last_tag_w"))
+    cb_count_w = int(r.get("cb_count_w", 0) or 0)
+    if cb_count_w < confirmed_b_count_w:
+        cb_count_w = confirmed_b_count_w
+        r["cb_count_w"] = cb_count_w
+
+    if w_brk > 0 and ltp > w_brk and w_pending_week != week_id and w_last_confirm_week != week_id:
+        w_pending_week = week_id
+        w_pending_tag = _cbuy_tag(max(cb_count_w, confirmed_b_count_w) + 1)
+        w_pending_ts = now_ts
+
+    if w_pending_week == week_id and is_weekly_finalize_slot:
+        if w_brk > 0 and ltp > w_brk:
+            cb_count_w += 1
+            r["cb_count_w"] = cb_count_w
+            r["timing_last_tag_w"] = _cbuy_tag(cb_count_w)
+            r["timing_last_event_ts_w"] = now_ts
+            r["cb_last_confirm_week_w"] = week_id
+        w_pending_week = ""
+        w_pending_tag = ""
+        w_pending_ts = 0.0
+
+    if w_pending_week == week_id and w_pending_tag:
+        r["timing_last_tag_w"] = w_pending_tag
+        r["timing_last_event_ts_w"] = w_pending_ts if w_pending_ts > 0 else now_ts
+    else:
+        r.setdefault("timing_last_tag_w", str(r.get("last_tag_w") or "—"))
+        r.setdefault("timing_last_event_ts_w", float(r.get("last_event_ts_w", 0.0) or 0.0))
+        if not w_pending_week:
+            r["timing_last_tag_w"] = str(r.get("last_tag_w") or "—")
+            r["timing_last_event_ts_w"] = float(r.get("last_event_ts_w", 0.0) or 0.0)
+
+    r["cb_pending_week_w"] = w_pending_week
+    r["cb_pending_tag_w"] = w_pending_tag
+    r["cb_pending_ts_w"] = w_pending_ts
+
+
+def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 10) -> None:
+    if hv is None or len(hv) < 6:
+        return
+    try:
+        now_dt = datetime.now(_IST)
+        now_date = now_dt.date()
+        last_date = datetime.fromtimestamp(float(hv[-1][0]), tz=_IST).date()
+        if last_date < now_date:
+            i = len(hv) - 1
+        elif last_date > now_date:
+            i = len(hv) - 2
+        else:
+            # last_date == now_date: defer partial bar unless Friday after cash (IST).
+            i = len(hv) - 2
+            if settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_ENABLED and now_dt.weekday() == 4:
+                if (now_dt.hour, now_dt.minute) >= (
+                    settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_HOUR,
+                    settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE,
+                ):
+                    i = len(hv) - 1
+        if i < 3:
+            return
+        curr = hv[i]
+        prev = hv[i - 1]
+        ts = float(curr[0])
+        close = float(curr[4])
+        low = float(curr[3])
+        prev_close = float(prev[4])
+    except Exception:
+        return
+
+    close_ser = np.asarray(hv[:, 4], dtype=np.float64)
+    highs = np.asarray(hv[:, 2], dtype=np.float64)
+    lows = np.asarray(hv[:, 3], dtype=np.float64)
+    e9_ser = _ema_series(close_ser, 9)
+    e21_ser = _ema_series(close_ser, 21)
+    if not (
+        np.isfinite(e9_ser[i]) and np.isfinite(e21_ser[i]) and np.isfinite(close) and np.isfinite(low)
+    ):
+        return
+
+    bar_key = _bar_date_key_from_ts(ts)
+    if not bar_key:
+        return
+
+    if not str(r.get("cycle_last_bar_key") or ""):
+        st_state = 0; st_below21 = 0; st_b = 0; st_e9t = 0; st_e21c = 0; st_rst = 0; st_last_tag = "—"; st_last_ts = 0.0
+        st_last_don_c: float | None = None
+        try:
+            dlen = max(2, int(don_len))
+            replay_end = i
+            for j in range(3, replay_end + 1):
+                if not (np.isfinite(e9_ser[j]) and np.isfinite(e21_ser[j]) and np.isfinite(close_ser[j])):
+                    continue
+                c = float(close_ser[j]); pc = float(close_ser[j - 1]); lo = float(lows[j]); e9j = float(e9_ser[j]); e21j = float(e21_ser[j])
+                trend = c > e9j and e9j > e21j
+                brk = False
+                if j >= dlen + 1:
+                    don_c = float(np.max(highs[(j - dlen):j]))
+                    don_p = float(np.max(highs[(j - dlen - 1):(j - 1)]))
+                    brk = bool(trend and c > don_c and pc <= don_p)
+                    st_last_don_c = don_c
+                # Pine parity: below21 counter runs on all confirmed bars.
+                st_below21 = st_below21 + 1 if c < e21j else 0
+                # Pine parity: RST is the ONLY thing that resets bCount / e9tCount / e21cCount.
+                # Breakouts only increment bCount; cycle counters persist across intra-cycle breakouts.
+                if st_state > 0 and st_below21 >= 2:
+                    st_rst += 1
+                    st_state = 0; st_b = 0; st_e9t = 0; st_e21c = 0
+                    st_last_tag = "RST"; st_last_ts = float(hv[j][0])
+                elif brk:
+                    st_state = 1
+                    st_b += 1
+                    st_last_tag = f"B{st_b}"
+                    if lo <= e9j:
+                        # Pine "Power Bar": breakout and EMA9 test same candle.
+                        st_last_tag = _tag_power_e9ct(st_last_tag)
+                    st_last_ts = float(hv[j][0])
+                elif st_state > 0:
+                    # Pine's layout: first an if/elif for state==1 transitions, then a SEPARATE
+                    # if for state==2 reclaim (so a bar that flipped 1→2 this bar can't also
+                    # reclaim in the same bar — but one that was already in state 2 can).
+                    if st_state == 1 and lo < e9j and c > e9j and not brk:
+                        st_e9t += 1; st_last_tag = _tag_e9ct(st_e9t); st_last_ts = float(hv[j][0])
+                    elif st_state == 1 and c < e9j:
+                        st_state = 2; st_last_tag = TAG_ET9_WAIT_F21C; st_last_ts = float(hv[j][0])
+                    elif st_state == 1 and c >= e9j and not brk:
+                        # E21C without a prior ETDN: prior close was under *that bar’s* EMA21, this close
+                        # reclaims back above the current EMA21 (rare; needs EMAs not stacked e9>21).
+                        pco = float(close_ser[j - 1])
+                        e21_prev = float(e21_ser[j - 1])
+                        if j >= 1 and pco < e21_prev and c > e21j:
+                            st_e21c += 1; st_last_tag = f"E21C{st_e21c}"
+                            st_last_ts = float(hv[j][0])
+                    if st_state == 2 and c > e9j:
+                        st_state = 1
+                        # E21C = reclaimed EMA21 on the EMA9 reclaim bar, not the old touch+deep filter.
+                        if c > e21j:
+                            st_e21c += 1; st_last_tag = f"E21C{st_e21c}"
+                        else:
+                            st_e9t += 1; st_last_tag = _tag_e9ct(st_e9t)
+                        st_last_ts = float(hv[j][0])
+        except Exception:
+            pass
+        r["cycle_state"] = st_state
+        r["state_name"] = "LOCKED" if st_state == 0 else ("TRENDING" if st_state == 1 else "PULLBACK")
+        r["below21_count"] = st_below21
+        r["b_count"] = st_b
+        r["e9t_count"] = st_e9t
+        r["e21c_count"] = st_e21c
+        r["rst_count"] = st_rst
+        r["last_tag"] = st_last_tag
+        r["last_event_ts"] = st_last_ts
+        r["cycle_last_bar_key"] = bar_key
+        if st_last_don_c is not None:
+            r["brk_lvl"] = st_last_don_c
+        return
+
+    if str(r.get("cycle_last_bar_key") or "") == bar_key:
+        return
+    r["cycle_last_bar_key"] = bar_key
+
+    state = int(r.get("cycle_state", 0) or 0)
+    below21 = int(r.get("below21_count", 0) or 0)
+    b_count = int(r.get("b_count", 0) or 0)
+    e9t_count = int(r.get("e9t_count", 0) or 0)
+    e21c_count = int(r.get("e21c_count", 0) or 0)
+    rst_count = int(r.get("rst_count", 0) or 0)
+    trend_ok = close > e9_ser[i] and e9_ser[i] > e21_ser[i]
+    dlen = max(2, int(don_len))
+    breakout = False
+    if i >= dlen + 1:
+        try:
+            don_curr = float(np.max(highs[(i - dlen):i]))
+            don_prev = float(np.max(highs[(i - dlen - 1):(i - 1)]))
+            breakout = bool(trend_ok and close > don_curr and prev_close <= don_prev)
+            r["brk_lvl"] = don_curr
+        except Exception:
+            breakout = False
+    # Pine parity: below21 counter runs on all confirmed bars.
+    below21 = below21 + 1 if close < e21_ser[i] else 0
+    last_tag = str(r.get("last_tag") or "—")
+    # Pine parity: only RST resets bCount / e9tCount / e21cCount; breakout just bumps bCount.
+    if state > 0 and below21 >= 2:
+        rst_count += 1
+        state = 0; b_count = 0; e9t_count = 0; e21c_count = 0; last_tag = "RST"
+    elif breakout:
+        state = 1
+        b_count += 1
+        last_tag = f"B{b_count}"
+        if low <= e9_ser[i]:
+            # Pine "Power Bar": breakout and EMA9 test same candle.
+            last_tag = _tag_power_e9ct(last_tag)
+    elif state > 0:
+        # Pine's layout: state==1 transitions via if/elif, then a separate
+        # if for state==2 reclaim so a 1→2 transition this bar cannot also reclaim.
+        if state == 1 and low < e9_ser[i] and close > e9_ser[i] and not breakout:
+            e9t_count += 1; last_tag = _tag_e9ct(e9t_count)
+        elif state == 1 and close < e9_ser[i]:
+            state = 2; last_tag = TAG_ET9_WAIT_F21C
+        elif state == 1 and not breakout and close >= e9_ser[i]:
+            # E21C without a prior ETDN: last close was under the prior EMA21; this close reclaims 21
+            # (only matters when the stack is not e9>21, else this rarely fires in state 1).
+            try:
+                pc0 = float(prev[4])
+                e21p = float(e21_ser[i - 1])
+                e21_now = float(e21_ser[i])
+                if i >= 1 and np.isfinite(e21p) and np.isfinite(e21_now) and pc0 < e21p and close > e21_now:
+                    e21c_count += 1; last_tag = f"E21C{e21c_count}"
+            except Exception:
+                pass
+        if state == 2 and close > e9_ser[i]:
+            state = 1
+            # E21C when the EMA9 reclaim bar also closes above EMA21; else shallow reclaim = E9T.
+            if close > e21_ser[i]:
+                e21c_count += 1; last_tag = f"E21C{e21c_count}"
+            else:
+                e9t_count += 1; last_tag = _tag_e9ct(e9t_count)
+    r["cycle_state"] = state
+    r["state_name"] = "LOCKED" if state == 0 else ("TRENDING" if state == 1 else "PULLBACK")
+    r["below21_count"] = below21
+    r["b_count"] = b_count
+    r["e9t_count"] = e9t_count
+    r["e21c_count"] = e21c_count
+    r["rst_count"] = rst_count
+    r["last_tag"] = last_tag
+    r["last_event_ts"] = ts
+
+
+def _weekly_ohlc5_from_daily_hv(hv: np.ndarray | None) -> np.ndarray | None:
+    if hv is None or len(hv) < 5:
+        return None
+    week: dict[tuple[int, int], list[float]] = {}
+    for row in hv:
+        try:
+            ts = float(row[0]); op = float(row[1]); hi = float(row[2]); lo = float(row[3]); cl = float(row[4])
+        except Exception:
+            continue
+        d = datetime.fromtimestamp(ts, tz=_IST).date()
+        iso = d.isocalendar()
+        k = (int(iso[0]), int(iso[1]))
+        if k not in week:
+            week[k] = [ts, op, hi, lo, cl]
+        else:
+            w = week[k]; w[0] = ts; w[2] = max(w[2], hi); w[3] = min(w[3], lo); w[4] = cl
+    if len(week) < 4:
+        return None
+    keys = sorted(week.keys())
+    return np.asarray([week[k] for k in keys], dtype=np.float64)
+
+
+def _weekly_atr_stop_from_daily_hv(
+    hv: np.ndarray | None,
+    ltp: float,
+    atr_period: int = 9,
+    atr_mult: float = 2.0,
+) -> float | None:
+    """
+    Weekly ATR stop proxy from daily OHLCV:
+    - collapse to weekly OHLC
+    - Wilder ATR(period) on weekly bars
+    - stop = current LTP - atr_mult * weekly_atr
+    """
+    w = _weekly_ohlc5_from_daily_hv(hv)
+    if w is None or len(w) < max(3, int(atr_period) + 1):
+        return None
+    try:
+        high = np.asarray(w[:, 2], dtype=np.float64)
+        low = np.asarray(w[:, 3], dtype=np.float64)
+        close = np.asarray(w[:, 4], dtype=np.float64)
+        n = int(max(2, atr_period))
+
+        tr = np.zeros(len(close), dtype=np.float64)
+        tr[0] = high[0] - low[0]
+        for i in range(1, len(close)):
+            hl = high[i] - low[i]
+            hc = abs(high[i] - close[i - 1])
+            lc = abs(low[i] - close[i - 1])
+            tr[i] = max(hl, hc, lc)
+
+        atr = np.full(len(close), np.nan, dtype=np.float64)
+        if len(close) <= n:
+            return None
+        atr[n - 1] = float(np.mean(tr[1:n]))
+        for i in range(n, len(close)):
+            atr[i] = (atr[i - 1] * (n - 1) + tr[i]) / n
+
+        atr_last = atr[-1]
+        if not np.isfinite(atr_last) and len(atr) > 1:
+            atr_last = atr[-2]
+        if not np.isfinite(atr_last) or atr_last <= 0:
+            return None
+        return float(ltp) - float(atr_mult) * float(atr_last)
+    except Exception:
+        return None
+
+
+def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: int = 10) -> None:
+    w = _weekly_ohlc5_from_daily_hv(hv)
+    if w is None:
+        return
+    tmp = {
+        "cycle_state": r.get("cycle_state_w", 0),
+        "below21_count": r.get("below21_count_w", 0),
+        "b_count": r.get("b_count_w", 0),
+        "e9t_count": r.get("e9t_count_w", 0),
+        "e21c_count": r.get("e21c_count_w", 0),
+        "rst_count": r.get("rst_count_w", 0),
+        "last_tag": r.get("last_tag_w", "—"),
+        "last_event_ts": r.get("last_event_ts_w", 0.0),
+        "cycle_last_bar_key": r.get("cycle_last_bar_key_w", ""),
+        "brk_lvl": r.get("brk_lvl_w"),
+    }
+    _update_minimal_cycle_state(tmp, w, don_len=don_len)
+    cstate = int(tmp.get("cycle_state", 0) or 0)
+    r["cycle_state_w"] = cstate
+    r["state_name_w"] = "LOCKED" if cstate == 0 else ("TRENDING" if cstate == 1 else "PULLBACK")
+    r["below21_count_w"] = int(tmp.get("below21_count", 0) or 0)
+    r["b_count_w"] = int(tmp.get("b_count", 0) or 0)
+    r["e9t_count_w"] = int(tmp.get("e9t_count", 0) or 0)
+    r["e21c_count_w"] = int(tmp.get("e21c_count", 0) or 0)
+    r["rst_count_w"] = int(tmp.get("rst_count", 0) or 0)
+    r["last_tag_w"] = str(tmp.get("last_tag", "—") or "—")
+    r["last_event_ts_w"] = float(tmp.get("last_event_ts", 0.0) or 0.0)
+    r["cycle_last_bar_key_w"] = str(tmp.get("cycle_last_bar_key", "") or "")
+    if tmp.get("brk_lvl") is not None:
+        r["brk_lvl_w"] = tmp.get("brk_lvl")
+
+
 def initial_sync_helper(self):
     def _fetch(s):
         try:
@@ -273,15 +731,52 @@ def initial_sync_helper(self):
                 d = self.db.get_historical_data(s, "1d", limit=lim)
             if d is not None and len(d) > 0:
                 with self.lock: [self.buffers[s].append(r) for r in d]; self.pending.add(s)
+                return True
         except Exception as e: LGR.error(f"Sync {s}: {e}")
-    _fetch(self.bench_sym)
-    with ThreadPoolExecutor(settings.SIDECAR_SYNC_WORKERS) as ex:
-        ex.map(_fetch, [s for s in self.symbols if s != self.bench_sym])
+        return False
+
+    # Only fetch symbols whose RingBuffer is still empty. update_universe() now preserves
+    # buffers for overlapping universes (Nifty 50 → Nifty 500 keeps the 50 already-loaded
+    # symbols), so reloading the full 900 bars for every ticker on every navigation is wasted.
+    def _is_empty(s):
+        buf = self.buffers.get(s)
+        return buf is None or buf.is_empty()
+
+    if _is_empty(self.bench_sym):
+        _fetch(self.bench_sym)
+    to_fetch = [s for s in self.symbols if s != self.bench_sym and _is_empty(s)]
+    t0 = time.time()
+    if to_fetch:
+        LGR.info(f"Sidecar history: fetching {len(to_fetch)} of {len(self.symbols)} symbols (rest already cached)")
+        # Drain the map iterator so all fetches actually execute (Executor.map is lazy).
+        with ThreadPoolExecutor(settings.SIDECAR_SYNC_WORKERS) as ex:
+            list(ex.map(_fetch, to_fetch))
+    else:
+        LGR.info(f"Sidecar history: all {len(self.symbols)} symbols already cached (instant switch)")
+    # Self-heal: for any symbol whose buffer is still empty, retry a few more times.
+    # Local parquet reads rarely fail transiently, but the Fyers fallback path can; keep
+    # a short, bounded retry loop so we do not stall the UI for a minute on fresh starts.
+    max_retries = int(os.getenv("SIDECAR_HISTORY_RETRIES", "2"))
+    retry_sleep = float(os.getenv("SIDECAR_HISTORY_RETRY_SLEEP", "1.5"))
+    for attempt in range(max_retries):
+        missing = [s for s in self.symbols if _is_empty(s)]
+        if not missing:
+            break
+        LGR.warning(f"Sidecar history retry #{attempt + 1}: {len(missing)} symbols still empty")
+        time.sleep(retry_sleep)
+        with ThreadPoolExecutor(settings.SIDECAR_SYNC_WORKERS) as ex:
+            list(ex.map(_fetch, missing))
+    final_missing = [s for s in self.symbols if _is_empty(s)]
+    dt = time.time() - t0
+    if final_missing:
+        LGR.warning(f"Sidecar history FAILED for {len(final_missing)} symbols after {dt:.1f}s: {final_missing[:20]}...")
+    else:
+        LGR.info(f"Sidecar history loaded for all {len(self.symbols)} symbols in {dt:.1f}s")
 
 def main_loop_helper(self):
     loop_sleep = max(0.05, float(settings.SIDECAR_LOOP_SLEEP_SEC))
     while self.is_scanning:
-        time.sleep(loop_sleep)
+        loop_t0 = time.time()
         # Snapshot keys so update_universe() replacing buffers cannot KeyError mid-iteration.
         for s in list(self.all_s):
             buf = self.buffers.get(s)
@@ -307,6 +802,10 @@ def main_loop_helper(self):
                             row["status"] if "status" in row.dtype.names else None
                         )
         tasks, self.pending = list(self.pending), set()
+        cap = max(1, int(settings.SIDECAR_MAX_TASKS_PER_LOOP))
+        if len(tasks) > cap:
+            self.pending.update(tasks[cap:])
+            tasks = tasks[:cap]
         b_vw = self.buffers[self.bench_sym].get_ordered_view() if self.bench_sym in self.buffers else None
         for s in tasks:
             # Stale `pending` tickers after `update_universe()` can still be processed once; new `results`
@@ -318,82 +817,117 @@ def main_loop_helper(self):
 
                 # --- PRO EDITION: SIGNAL LINE & CROSSOVERS ---
                 # Streaming MRS deque per symbol (length from quant_breakout_config); signal line = SMA(mrs_signal_period).
-                if not hasattr(self, '_mrs_history_buffers'):
-                    self._mrs_history_buffers = {}
-
+                # Only used by calculate_breakout_signals to label crossovers ("BUY NOW" when
+                # mrs crosses its own signal line). None of the current breakout grids render
+                # this label, so SIDECAR_MRS_SIGNAL_ENABLED=0 cleanly drops the deque work.
                 p = merge_params_with_windows(self.params)
-                mrs_period = int(p["mrs_signal_period"])
-                buf_max = int(p["mrs_history_buffer_max"])
-
-                if s not in self._mrs_history_buffers:
-                    self._mrs_history_buffers[s] = {"mrs": deque(maxlen=buf_max)}
-
-                # 1. Update MRS History
                 current_mrs = float(row['mrs'])
-                self._mrs_history_buffers[s]["mrs"].append(current_mrs)
-
-                # 2. MRS signal line (SMA of length mrs_signal_period)
-                mrs_deque = self._mrs_history_buffers[s]["mrs"]
-                mrs_signal = compute_mrs_signal_line(mrs_deque, mrs_period)
+                if settings.SIDECAR_MRS_SIGNAL_ENABLED:
+                    if not hasattr(self, '_mrs_history_buffers'):
+                        self._mrs_history_buffers = {}
+                    mrs_period = int(p["mrs_signal_period"])
+                    buf_max = int(p["mrs_history_buffer_max"])
+                    if s not in self._mrs_history_buffers:
+                        self._mrs_history_buffers[s] = {"mrs": deque(maxlen=buf_max)}
+                    self._mrs_history_buffers[s]["mrs"].append(current_mrs)
+                    mrs_deque = self._mrs_history_buffers[s]["mrs"]
+                    mrs_signal = compute_mrs_signal_line(mrs_deque, mrs_period)
+                else:
+                    mrs_signal = 0.0
                 hv = self.buffers[s].get_ordered_view()
                 hv_d = collapse_sidecar_buffer_to_daily_ohlc(hv) if hv is not None else None
                 hv_bar = hv_d if hv_d is not None and len(hv_d) >= 2 else hv
+                # Recovery path: some symbols can be present in SHM/live feed but miss sidecar history
+                # (bridge/db lag, late universe swap). Without history, LAST TAG / timing stays blank.
+                if hv_bar is None or len(hv_bar) < 6:
+                    try:
+                        now_ts = time.time()
+                        if not hasattr(self, "_symbol_hist_retry_ts"):
+                            self._symbol_hist_retry_ts = {}
+                        last_try = float(self._symbol_hist_retry_ts.get(s, 0.0))
+                        if now_ts - last_try >= 120.0:
+                            self._symbol_hist_retry_ts[s] = now_ts
+                            d = self.bridge.get_historical_data(s, limit=900)
+                            if d is None:
+                                d = self.db.get_historical_data(s, "1d", limit=900)
+                            if d is not None and len(d) > 0:
+                                with self.lock:
+                                    for rr in d:
+                                        self.buffers[s].append(rr)
+                                hv = self.buffers[s].get_ordered_view()
+                                hv_d = collapse_sidecar_buffer_to_daily_ohlc(hv) if hv is not None else None
+                                hv_bar = hv_d if hv_d is not None and len(hv_d) >= 2 else hv
+                    except Exception:
+                        pass
                 b_bar = (
                     collapse_sidecar_buffer_to_daily_ohlc(b_vw)
                     if b_vw is not None
                     else None
                 )
                 b_bar = b_bar if b_bar is not None and len(b_bar) >= 2 else b_vw
-                # Daily EMA30 context for pullback/pierce filters.
-                try:
-                    if hv_bar is not None and len(hv_bar) >= 2:
-                        cser = np.asarray(hv_bar[:, 4], dtype=np.float64)
-                        e30 = _ema_series(cser, 30)
-                        ema30_val = float(e30[-1]) if e30.size else float("nan")
-                        ema30_prev = float(e30[-2]) if e30.size >= 2 else float("nan")
-                        prev_close = float(cser[-2]) if cser.size >= 2 else float("nan")
-                    else:
+                # Daily EMA30 context for pullback/pierce filters. Not rendered in the current
+                # /breakout or /breakout-timing grids — kept behind a flag so users running the
+                # Stage-1 box / RVCR backtests can re-enable it via SIDECAR_EMA30_ENABLED=1.
+                if settings.SIDECAR_EMA30_ENABLED:
+                    try:
+                        if hv_bar is not None and len(hv_bar) >= 2:
+                            cser = np.asarray(hv_bar[:, 4], dtype=np.float64)
+                            e30 = _ema_series(cser, 30)
+                            ema30_val = float(e30[-1]) if e30.size else float("nan")
+                            ema30_prev = float(e30[-2]) if e30.size >= 2 else float("nan")
+                            prev_close = float(cser[-2]) if cser.size >= 2 else float("nan")
+                        else:
+                            ema30_val = float("nan")
+                            ema30_prev = float("nan")
+                            prev_close = float("nan")
+                    except Exception:
                         ema30_val = float("nan")
                         ema30_prev = float("nan")
                         prev_close = float("nan")
-                except Exception:
-                    ema30_val = float("nan")
-                    ema30_prev = float("nan")
-                    prev_close = float("nan")
-                with self.lock:
-                    _r = self.results.get(s)
-                    if _r is not None:
-                        _r["ema30"] = ema30_val
-                        _r["ema30_prev"] = ema30_prev
-                        _r["prev_close"] = prev_close
+                    with self.lock:
+                        _r = self.results.get(s)
+                        if _r is not None:
+                            _r["ema30"] = ema30_val
+                            _r["ema30_prev"] = ema30_prev
+                            _r["prev_close"] = prev_close
 
                 # 2.4 Stage-1 price box (8+ week accumulation base)
-                box_refresh = float(os.getenv("STAGE1_BOX_REFRESH_SEC", "120"))
-                if not hasattr(self, "_stage1_box_cache"):
-                    self._stage1_box_cache = {}
-                box_cached = self._stage1_box_cache.get(s)
-                if box_cached and (time.time() - float(box_cached.get("ts", 0.0))) < box_refresh:
-                    box_flag = bool(box_cached.get("flag", False))
-                    box_weeks = int(box_cached.get("weeks", 0))
-                    box_range = float(box_cached.get("range", 0.0))
-                    vol_dry = bool(box_cached.get("vol_dry", False))
-                    vol_dry_ratio = float(box_cached.get("vol_dry_ratio", 0.0))
-                    ma_flat = bool(box_cached.get("ma_flat", False))
-                    ma_dev = float(box_cached.get("ma_dev", 0.0))
-                    stage2_confirm = bool(box_cached.get("stage2_confirm", False))
+                if settings.SIDECAR_STAGE1_BOX_ENABLED:
+                    box_refresh = float(os.getenv("STAGE1_BOX_REFRESH_SEC", "120"))
+                    if not hasattr(self, "_stage1_box_cache"):
+                        self._stage1_box_cache = {}
+                    box_cached = self._stage1_box_cache.get(s)
+                    if box_cached and (time.time() - float(box_cached.get("ts", 0.0))) < box_refresh:
+                        box_flag = bool(box_cached.get("flag", False))
+                        box_weeks = int(box_cached.get("weeks", 0))
+                        box_range = float(box_cached.get("range", 0.0))
+                        vol_dry = bool(box_cached.get("vol_dry", False))
+                        vol_dry_ratio = float(box_cached.get("vol_dry_ratio", 0.0))
+                        ma_flat = bool(box_cached.get("ma_flat", False))
+                        ma_dev = float(box_cached.get("ma_dev", 0.0))
+                        stage2_confirm = bool(box_cached.get("stage2_confirm", False))
+                    else:
+                        box_flag, box_weeks, box_range, vol_dry, vol_dry_ratio, ma_flat, ma_dev, stage2_confirm = _stage1_price_box_from_ohlcv(hv_bar)
+                        self._stage1_box_cache[s] = {
+                            "ts": time.time(),
+                            "flag": bool(box_flag),
+                            "weeks": int(box_weeks),
+                            "range": float(box_range),
+                            "vol_dry": bool(vol_dry),
+                            "vol_dry_ratio": float(vol_dry_ratio),
+                            "ma_flat": bool(ma_flat),
+                            "ma_dev": float(ma_dev),
+                            "stage2_confirm": bool(stage2_confirm),
+                        }
                 else:
-                    box_flag, box_weeks, box_range, vol_dry, vol_dry_ratio, ma_flat, ma_dev, stage2_confirm = _stage1_price_box_from_ohlcv(hv_bar)
-                    self._stage1_box_cache[s] = {
-                        "ts": time.time(),
-                        "flag": bool(box_flag),
-                        "weeks": int(box_weeks),
-                        "range": float(box_range),
-                        "vol_dry": bool(vol_dry),
-                        "vol_dry_ratio": float(vol_dry_ratio),
-                        "ma_flat": bool(ma_flat),
-                        "ma_dev": float(ma_dev),
-                        "stage2_confirm": bool(stage2_confirm),
-                    }
+                    box_flag = False
+                    box_weeks = 0
+                    box_range = 0.0
+                    vol_dry = False
+                    vol_dry_ratio = 0.0
+                    ma_flat = False
+                    ma_dev = 0.0
+                    stage2_confirm = False
                 with self.lock:
                     _r = self.results.get(s)
                     if _r is not None:
@@ -406,128 +940,139 @@ def main_loop_helper(self):
                         _r["stage1_ma_dev"] = float(ma_dev)
                         _r["stage2_confirm"] = bool(stage2_confirm)
 
-                # 2.5. RVCR (weekly-style): match TradingView weekly pane.
-                # - Compute weekly Mansfield mRS series from daily OHLC (hv_bar) + benchmark (b_bar).
-                # - Compute mRS_signal = SMA(mRS, 30) (your Pine script).
-                # - Compute slopeLine = EMA(mRS, 30) or SMA(mRS, 30) (your "slope line").
-                # - Signal when: slopeLine is rising by eps AND signal line crosses above slope line.
-                rvcr_refresh = float(os.getenv("MRS_RVCR_WEEKLY_REFRESH_SEC", "60"))
-                ma_len = int(os.getenv("MRS_WEEKLY_BASE_MA_LEN", "52"))
-                sig_len = int(os.getenv("MRS_WEEKLY_SIGNAL_LEN", "30"))
-                slope_len = int(os.getenv("MRS_RVCR_SLOPE_LEN", "30"))
-                slope_eps = float(os.getenv("MRS_RVCR_SLOPE_EPS", "0.01"))
-                now_ts = time.time()
-                if not hasattr(self, "_rvcr_weekly_cache"):
-                    self._rvcr_weekly_cache = {}
-                cached = self._rvcr_weekly_cache.get(s)
-                if cached and (now_ts - float(cached.get("ts", 0))) < rvcr_refresh:
+                if not settings.SIDECAR_RVCR_ENABLED:
                     with self.lock:
                         _r = self.results.get(s)
                         if _r is not None:
-                            _r["mrs_rcvr"] = bool(cached.get("flag", False))
-                            _r["mrs_rcvr_slope"] = float(cached.get("slope", 0.0))
-                            _r["mrs_neg_ma10_rising"] = bool(cached.get("neg_ma10_rising", False))
-                else:
-                    flag = False
-                    slope_val = 0.0
-                    neg_ma10_rising = False
-                    try:
-                        wk_s = _weekly_close_map_from_ohlcv(hv_bar)
-                        wk_b = _weekly_close_map_from_ohlcv(b_bar) if b_bar is not None else {}
-                        if wk_s and wk_b:
-                            keys = sorted(set(wk_s.keys()) & set(wk_b.keys()))
-                            # Allow shorter-history symbols by adapting MA lengths to available weeks.
-                            # We still require at least 3 points for a reliable last/prev check.
-                            need_weeks = int(max(3, max(sig_len, slope_len) + 2))
-                            if len(keys) >= need_weeks:
-                                s_close = np.asarray([wk_s[k] for k in keys], dtype=np.float64)
-                                b_close = np.asarray([wk_b[k] for k in keys], dtype=np.float64)
-                                ratio = s_close / (b_close + 1e-9)
-                                # Pine: avgRatio = sma(baseRatio, 52); mRS = ((ratio/avgRatio)-1)*10
-                                ma_eff = max(3, min(ma_len, int(ratio.size - 2)))
-                                sig_eff = max(2, min(sig_len, int(ratio.size)))
-                                slope_eff = max(2, min(slope_len, int(ratio.size)))
-                                # rolling SMA for ratio
-                                avg = np.full_like(ratio, np.nan, dtype=np.float64)
-                                if ratio.size >= ma_eff:
-                                    csum = np.cumsum(ratio, dtype=np.float64)
-                                    csum = np.insert(csum, 0, 0.0)
-                                    for i2 in range(ma_eff - 1, ratio.size):
-                                        avg[i2] = (csum[i2 + 1] - csum[i2 + 1 - ma_eff]) / float(ma_eff)
-                                mrs_series = np.nan_to_num(((ratio / (avg + 1e-12)) - 1.0) * 10.0, nan=0.0)
-                                if mrs_series.size >= 11:
-                                    ma10_now = float(np.mean(mrs_series[-10:]))
-                                    ma10_prev = float(np.mean(mrs_series[-11:-1]))
-                                    mrs_now = float(mrs_series[-1])
-                                    neg_ma10_rising = (mrs_now < 0.0) and (ma10_now > ma10_prev)
+                            _r["mrs_rcvr"] = False
+                            _r["mrs_rcvr_slope"] = 0.0
+                            _r["mrs_neg_ma10_rising"] = False
+                            _r["mrs_rcvr_latched"] = False
 
-                                # Signal line (SMA of mRS)
-                                sig = np.full_like(mrs_series, np.nan, dtype=np.float64)
-                                if mrs_series.size >= sig_eff:
-                                    c2 = np.cumsum(mrs_series, dtype=np.float64)
-                                    c2 = np.insert(c2, 0, 0.0)
-                                    for i2 in range(sig_eff - 1, mrs_series.size):
-                                        sig[i2] = (c2[i2 + 1] - c2[i2 + 1 - sig_eff]) / float(sig_eff)
-
-                                # Slope line: EMA30 or SMA30 of mRS
-                                ma_type = os.getenv("MRS_RVCR_SLOPE_MA_TYPE", "EMA").strip().upper()
-                                if ma_type == "SMA":
-                                    slope = np.full_like(mrs_series, np.nan, dtype=np.float64)
-                                    if mrs_series.size >= slope_eff:
-                                        c3 = np.cumsum(mrs_series, dtype=np.float64)
-                                        c3 = np.insert(c3, 0, 0.0)
-                                        for i2 in range(slope_eff - 1, mrs_series.size):
-                                            slope[i2] = (c3[i2 + 1] - c3[i2 + 1 - slope_eff]) / float(slope_eff)
-                                else:
-                                    slope = _ema_series(mrs_series, slope_eff)
-
-                                # Latest usable index (both lines present)
-                                i_last = int(mrs_series.size - 1)
-                                if i_last >= 1 and np.isfinite(slope[i_last]) and np.isfinite(slope[i_last - 1]):
-                                    slope_val = float(slope[i_last] - slope[i_last - 1])
-                                    slope_up = slope_val > slope_eps
-                                    if np.isfinite(sig[i_last]) and np.isfinite(sig[i_last - 1]):
-                                        # Signal rule: slope rising + signal line piercing above slope line.
-                                        sig_cross = (float(sig[i_last - 1]) <= float(slope[i_last - 1])) and (
-                                            float(sig[i_last]) > float(slope[i_last])
-                                        )
-                                        flag = slope_up and sig_cross
-                    except Exception:
+                if settings.SIDECAR_RVCR_ENABLED:
+                    # 2.5. RVCR (weekly-style): match TradingView weekly pane.
+                    # - Compute weekly Mansfield mRS series from daily OHLC (hv_bar) + benchmark (b_bar).
+                    # - Compute mRS_signal = SMA(mRS, 30) (your Pine script).
+                    # - Compute slopeLine = EMA(mRS, 30) or SMA(mRS, 30) (your "slope line").
+                    # - Signal when: slopeLine is rising by eps AND signal line crosses above slope line.
+                    rvcr_refresh = float(os.getenv("MRS_RVCR_WEEKLY_REFRESH_SEC", "60"))
+                    ma_len = int(os.getenv("MRS_WEEKLY_BASE_MA_LEN", "52"))
+                    sig_len = int(os.getenv("MRS_WEEKLY_SIGNAL_LEN", "30"))
+                    slope_len = int(os.getenv("MRS_RVCR_SLOPE_LEN", "30"))
+                    slope_eps = float(os.getenv("MRS_RVCR_SLOPE_EPS", "0.01"))
+                    now_ts = time.time()
+                    if not hasattr(self, "_rvcr_weekly_cache"):
+                        self._rvcr_weekly_cache = {}
+                    cached = self._rvcr_weekly_cache.get(s)
+                    if cached and (now_ts - float(cached.get("ts", 0))) < rvcr_refresh:
+                        with self.lock:
+                            _r = self.results.get(s)
+                            if _r is not None:
+                                _r["mrs_rcvr"] = bool(cached.get("flag", False))
+                                _r["mrs_rcvr_slope"] = float(cached.get("slope", 0.0))
+                                _r["mrs_neg_ma10_rising"] = bool(cached.get("neg_ma10_rising", False))
+                    else:
                         flag = False
                         slope_val = 0.0
                         neg_ma10_rising = False
+                        try:
+                            wk_s = _weekly_close_map_from_ohlcv(hv_bar)
+                            wk_b = _weekly_close_map_from_ohlcv(b_bar) if b_bar is not None else {}
+                            if wk_s and wk_b:
+                                keys = sorted(set(wk_s.keys()) & set(wk_b.keys()))
+                                # Allow shorter-history symbols by adapting MA lengths to available weeks.
+                                # We still require at least 3 points for a reliable last/prev check.
+                                need_weeks = int(max(3, max(sig_len, slope_len) + 2))
+                                if len(keys) >= need_weeks:
+                                    s_close = np.asarray([wk_s[k] for k in keys], dtype=np.float64)
+                                    b_close = np.asarray([wk_b[k] for k in keys], dtype=np.float64)
+                                    ratio = s_close / (b_close + 1e-9)
+                                    # Pine: avgRatio = sma(baseRatio, 52); mRS = ((ratio/avgRatio)-1)*10
+                                    ma_eff = max(3, min(ma_len, int(ratio.size - 2)))
+                                    sig_eff = max(2, min(sig_len, int(ratio.size)))
+                                    slope_eff = max(2, min(slope_len, int(ratio.size)))
+                                    # rolling SMA for ratio
+                                    avg = np.full_like(ratio, np.nan, dtype=np.float64)
+                                    if ratio.size >= ma_eff:
+                                        csum = np.cumsum(ratio, dtype=np.float64)
+                                        csum = np.insert(csum, 0, 0.0)
+                                        for i2 in range(ma_eff - 1, ratio.size):
+                                            avg[i2] = (csum[i2 + 1] - csum[i2 + 1 - ma_eff]) / float(ma_eff)
+                                    mrs_series = np.nan_to_num(((ratio / (avg + 1e-12)) - 1.0) * 10.0, nan=0.0)
+                                    if mrs_series.size >= 11:
+                                        ma10_now = float(np.mean(mrs_series[-10:]))
+                                        ma10_prev = float(np.mean(mrs_series[-11:-1]))
+                                        mrs_now = float(mrs_series[-1])
+                                        neg_ma10_rising = (mrs_now < 0.0) and (ma10_now > ma10_prev)
 
-                    self._rvcr_weekly_cache[s] = {
-                        "ts": now_ts,
-                        "flag": bool(flag),
-                        "slope": float(slope_val),
-                        "neg_ma10_rising": bool(neg_ma10_rising),
-                    }
+                                    # Signal line (SMA of mRS)
+                                    sig = np.full_like(mrs_series, np.nan, dtype=np.float64)
+                                    if mrs_series.size >= sig_eff:
+                                        c2 = np.cumsum(mrs_series, dtype=np.float64)
+                                        c2 = np.insert(c2, 0, 0.0)
+                                        for i2 in range(sig_eff - 1, mrs_series.size):
+                                            sig[i2] = (c2[i2 + 1] - c2[i2 + 1 - sig_eff]) / float(sig_eff)
+
+                                    # Slope line: EMA30 or SMA30 of mRS
+                                    ma_type = os.getenv("MRS_RVCR_SLOPE_MA_TYPE", "EMA").strip().upper()
+                                    if ma_type == "SMA":
+                                        slope = np.full_like(mrs_series, np.nan, dtype=np.float64)
+                                        if mrs_series.size >= slope_eff:
+                                            c3 = np.cumsum(mrs_series, dtype=np.float64)
+                                            c3 = np.insert(c3, 0, 0.0)
+                                            for i2 in range(slope_eff - 1, mrs_series.size):
+                                                slope[i2] = (c3[i2 + 1] - c3[i2 + 1 - slope_eff]) / float(slope_eff)
+                                    else:
+                                        slope = _ema_series(mrs_series, slope_eff)
+
+                                    # Latest usable index (both lines present)
+                                    i_last = int(mrs_series.size - 1)
+                                    if i_last >= 1 and np.isfinite(slope[i_last]) and np.isfinite(slope[i_last - 1]):
+                                        slope_val = float(slope[i_last] - slope[i_last - 1])
+                                        slope_up = slope_val > slope_eps
+                                        if np.isfinite(sig[i_last]) and np.isfinite(sig[i_last - 1]):
+                                            # Signal rule: slope rising + signal line piercing above slope line.
+                                            sig_cross = (float(sig[i_last - 1]) <= float(slope[i_last - 1])) and (
+                                                float(sig[i_last]) > float(slope[i_last])
+                                            )
+                                            flag = slope_up and sig_cross
+                        except Exception:
+                            flag = False
+                            slope_val = 0.0
+                            neg_ma10_rising = False
+
+                        self._rvcr_weekly_cache[s] = {
+                            "ts": now_ts,
+                            "flag": bool(flag),
+                            "slope": float(slope_val),
+                            "neg_ma10_rising": bool(neg_ma10_rising),
+                        }
+                        with self.lock:
+                            _r = self.results.get(s)
+                            if _r is not None:
+                                _r["mrs_rcvr"] = bool(flag)
+                                _r["mrs_rcvr_slope"] = float(slope_val)
+                                _r["mrs_neg_ma10_rising"] = bool(neg_ma10_rising)
+
+                    # Latch RVCR while mRS is below zero so Stage-1 candidates do not flicker.
                     with self.lock:
                         _r = self.results.get(s)
                         if _r is not None:
-                            _r["mrs_rcvr"] = bool(flag)
-                            _r["mrs_rcvr_slope"] = float(slope_val)
-                            _r["mrs_neg_ma10_rising"] = bool(neg_ma10_rising)
-
-                # Latch RVCR while mRS is below zero so Stage-1 candidates do not flicker.
-                with self.lock:
-                    _r = self.results.get(s)
-                    if _r is not None:
-                        prev_latched = bool(_r.get("mrs_rcvr_latched", False))
-                        curr_flag = bool(_r.get("mrs_rcvr", False))
-                        if current_mrs < 0:
-                            latched = prev_latched or curr_flag
-                        else:
-                            latched = False
-                        _r["mrs_rcvr_latched"] = latched
-                        _r["mrs_rcvr"] = latched
+                            prev_latched = bool(_r.get("mrs_rcvr_latched", False))
+                            curr_flag = bool(_r.get("mrs_rcvr", False))
+                            if current_mrs < 0:
+                                latched = prev_latched or curr_flag
+                            else:
+                                latched = False
+                            _r["mrs_rcvr_latched"] = latched
+                            _r["mrs_rcvr"] = latched
 
                 # 3. Generate Pro Signature Signal
                 with self.lock:
                     _r = self.results.get(s)
                 if _r is None:
                     continue
+                _update_live_timing_breakout_status(_r, float(row["ltp"]), datetime.now(_IST))
                 p["rs_rating_info"] = {
                     "rs_rating": int(row['rs_rating']),
                     "mrs": current_mrs,
@@ -547,32 +1092,38 @@ def main_loop_helper(self):
                         # Breakout page uses self.results + format_ui_row only.
                     raw_pw = int(p["pivot_high_window"])
                     pw_cap = max(1, min(raw_pw, 500))
-                    pw_use = effective_pivot_window(len(hv_bar), pw_cap) if hv_bar is not None else None
-                    if pw_use is not None and hv_bar is not None:
-                        _r["brk_lvl"] = float(detect_pivot_high(hv_bar[:-1, 2], pw_use))
+                    hv_for_breakout = trim_series_after_corporate_action(hv_bar) if hv_bar is not None else None
+                    pw_use = effective_pivot_window(len(hv_for_breakout), pw_cap) if hv_for_breakout is not None else None
+                    if pw_use is not None and hv_for_breakout is not None:
+                        _r["brk_lvl"] = float(detect_pivot_high(hv_for_breakout[:-1, 2], pw_use))
 
-                    # Daily + weekly: same pivot window length (daily bars vs weekly buckets) + EMA9 > EMA21 each TF.
+                    # Daily + weekly EMA9/EMA21 stacks feed the TREND_OK dropdown filter and
+                    # the (unrendered) ema_d_str / ema_w_str / tf_ema display fields. Behind
+                    # a flag because 4× 900-bar EMA per task is a notable chunk of loop CPU.
+                    # brk_lvl_w still gets computed regardless — it's the weekly pivot level
+                    # and is what the sidecar's own /breakout UI renders.
                     ema_fast = max(2, int(settings.UDAI_EMA_FAST))
                     ema_slow = max(3, int(settings.UDAI_EMA_SLOW))
-                    if hv_bar is not None and len(hv_bar) >= ema_slow + 2:
-                        cser = np.asarray(hv_bar[:, 4], dtype=np.float64)
-                        e9d = _ema_series(cser, ema_fast)
-                        e21d = _ema_series(cser, ema_slow)
-                        e9dv, e21dv = float(e9d[-1]), float(e21d[-1])
-                        d_ok = (
-                            np.isfinite(e9dv)
-                            and np.isfinite(e21dv)
-                            and e9dv > e21dv
-                        )
-                        _r["ema9_d"] = e9dv if np.isfinite(e9dv) else None
-                        _r["ema21_d"] = e21dv if np.isfinite(e21dv) else None
-                        _r["daily_ema_stack_ok"] = bool(d_ok)
-                    else:
-                        _r["ema9_d"] = None
-                        _r["ema21_d"] = None
-                        _r["daily_ema_stack_ok"] = False
+                    if settings.SIDECAR_EMA_STACK_ENABLED:
+                        if hv_bar is not None and len(hv_bar) >= ema_slow + 2:
+                            cser = np.asarray(hv_bar[:, 4], dtype=np.float64)
+                            e9d = _ema_series(cser, ema_fast)
+                            e21d = _ema_series(cser, ema_slow)
+                            e9dv, e21dv = float(e9d[-1]), float(e21d[-1])
+                            d_ok = (
+                                np.isfinite(e9dv)
+                                and np.isfinite(e21dv)
+                                and e9dv > e21dv
+                            )
+                            _r["ema9_d"] = e9dv if np.isfinite(e9dv) else None
+                            _r["ema21_d"] = e21dv if np.isfinite(e21dv) else None
+                            _r["daily_ema_stack_ok"] = bool(d_ok)
+                        else:
+                            _r["ema9_d"] = None
+                            _r["ema21_d"] = None
+                            _r["daily_ema_stack_ok"] = False
 
-                    wc = _weekly_high_close_series_from_hv(hv_bar) if hv_bar is not None else None
+                    wc = _weekly_high_close_series_from_hv(hv_for_breakout) if hv_for_breakout is not None else None
                     if wc is not None:
                         wh, wcl = wc
                         pw_w = effective_pivot_window(len(wh), pw_cap)
@@ -580,32 +1131,45 @@ def main_loop_helper(self):
                             _r["brk_lvl_w"] = float(detect_pivot_high(wh[:-1], pw_w))
                         else:
                             _r["brk_lvl_w"] = None
-                        if wcl.size >= ema_slow + 1:
-                            e9w = _ema_series(wcl, ema_fast)
-                            e21w = _ema_series(wcl, ema_slow)
-                            e9wv, e21wv = float(e9w[-1]), float(e21w[-1])
-                            w_ok = (
-                                np.isfinite(e9wv)
-                                and np.isfinite(e21wv)
-                                and e9wv > e21wv
-                            )
-                            _r["ema9_w"] = e9wv if np.isfinite(e9wv) else None
-                            _r["ema21_w"] = e21wv if np.isfinite(e21wv) else None
-                            _r["weekly_ema_stack_ok"] = bool(w_ok)
-                        else:
+                        if settings.SIDECAR_EMA_STACK_ENABLED:
+                            if wcl.size >= ema_slow + 1:
+                                e9w = _ema_series(wcl, ema_fast)
+                                e21w = _ema_series(wcl, ema_slow)
+                                e9wv, e21wv = float(e9w[-1]), float(e21w[-1])
+                                w_ok = (
+                                    np.isfinite(e9wv)
+                                    and np.isfinite(e21wv)
+                                    and e9wv > e21wv
+                                )
+                                _r["ema9_w"] = e9wv if np.isfinite(e9wv) else None
+                                _r["ema21_w"] = e21wv if np.isfinite(e21wv) else None
+                                _r["weekly_ema_stack_ok"] = bool(w_ok)
+                            else:
+                                _r["ema9_w"] = None
+                                _r["ema21_w"] = None
+                                _r["weekly_ema_stack_ok"] = False
+                    else:
+                        _r["brk_lvl_w"] = None
+                        if settings.SIDECAR_EMA_STACK_ENABLED:
                             _r["ema9_w"] = None
                             _r["ema21_w"] = None
                             _r["weekly_ema_stack_ok"] = False
-                    else:
-                        _r["brk_lvl_w"] = None
-                        _r["ema9_w"] = None
-                        _r["ema21_w"] = None
-                        _r["weekly_ema_stack_ok"] = False
 
-                    d_stack = bool(_r.get("daily_ema_stack_ok"))
-                    w_stack = bool(_r.get("weekly_ema_stack_ok"))
-                    _r["dual_tf_ema_stack_ok"] = d_stack and w_stack
-                    _r["dual_tf_stack_score"] = int(d_stack) + int(w_stack)
+                    if settings.SIDECAR_EMA_STACK_ENABLED:
+                        d_stack = bool(_r.get("daily_ema_stack_ok"))
+                        w_stack = bool(_r.get("weekly_ema_stack_ok"))
+                        _r["dual_tf_ema_stack_ok"] = d_stack and w_stack
+                        _r["dual_tf_stack_score"] = int(d_stack) + int(w_stack)
+                    _update_minimal_cycle_state(
+                        _r,
+                        hv_for_breakout,
+                        don_len=max(2, int(p.get("pivot_high_window", settings.BREAKOUT_PIVOT_HIGH_WINDOW))),
+                    )
+                    _update_minimal_cycle_state_weekly(
+                        _r,
+                        hv_for_breakout,
+                        don_len=max(2, int(p.get("pivot_high_window", settings.BREAKOUT_PIVOT_HIGH_WINDOW))),
+                    )
                 except Exception as e:
                     LGR.error(f"Error calculating breakout signals for {s}: {e}")
 
@@ -643,6 +1207,14 @@ def main_loop_helper(self):
                                 risk_pct=settings.UDAI_RISK_PCT,
                                 account_equity=settings.UDAI_ACCOUNT_EQUITY,
                             )
+                            w_stop = _weekly_atr_stop_from_daily_hv(
+                                d_hist,
+                                lp,
+                                atr_period=settings.UDAI_ATR_PERIOD,
+                                atr_mult=settings.UDAI_ATR_MULT,
+                            )
+                            if w_stop is not None:
+                                u["weekly_stop_price"] = float(w_stop)
                             self.udai_state[s] = st
                             if _ru is not None:
                                 _ru.update(u)
@@ -718,6 +1290,14 @@ def main_loop_helper(self):
             except Exception:
                 # Never let a scheduling bug kill sidecar scanning.
                 pass
+
+        # Pace the loop: if work took longer than loop_sleep, still pause one full slot so the
+        # host does not sit at ~100% CPU (leading sleep alone does not help when work >> sleep).
+        elapsed = time.time() - loop_t0
+        if elapsed < loop_sleep:
+            time.sleep(loop_sleep - elapsed)
+        else:
+            time.sleep(loop_sleep)
 
 def _refresh_sidecar_monthly_rsi2(self):
     live_ok = sidecar_live_rsi2_window_ok(
@@ -1042,6 +1622,18 @@ def _refresh_sidecar_pre_thrust(self, *, run_date):
     else:
         LGR.info("Pre-thrust: no candidates computed for run_date=%s", run_date)
 
+
+def _fmt_last_event_ist(ts_raw) -> str:
+    """Bar / event unix time → IST wall clock for sidecar timing page."""
+    try:
+        t = float(ts_raw or 0.0)
+        if t <= 0:
+            return "—"
+        return datetime.fromtimestamp(t, tz=_IST).strftime("%Y-%m-%d %H:%M IST")
+    except Exception:
+        return "—"
+
+
 def format_ui_row(d):
     s = d.get('symbol', '')
     try:
@@ -1076,6 +1668,19 @@ def format_ui_row(d):
     ema_stack_tooltip = f"{ema_d_str} | {ema_w_str}"
     sp = d.get("stop_price")
     stop_disp = f"{float(sp):.2f}" if sp is not None else "—"
+    wsp = d.get("weekly_stop_price")
+    weekly_stop_disp = f"{float(wsp):.2f}" if wsp is not None else "—"
+    try:
+        _ltp_num = float(d.get("ltp", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        _ltp_num = 0.0
+    try:
+        _sp_num = float(wsp) if wsp is not None else float("nan")
+    except (TypeError, ValueError):
+        _sp_num = float("nan")
+    atr_below = bool(np.isfinite(_sp_num) and _ltp_num > 0 and _ltp_num < _sp_num)
+    atr_state_ui = "BELOW" if atr_below else "ABOVE"
+    atr_state_color = "#FF3131" if atr_below else "#00FF00"
     if not settings.SIDECAR_UDAI_PINE:
         udai_disp = "OFF"
     else:
@@ -1106,8 +1711,44 @@ def format_ui_row(d):
         mfv = float(_mr)
         mrsi_ui = f"{mfv:.2f}" + ("*" if _mrl else "")
         mrsi_color = "#00FF00" if mfv < 2.0 else ("#FFB000" if mfv < 5.0 else "#D1D1D1")
+    _ttd = str(d.get("timing_last_tag") or d.get("last_tag") or "—")
+    _ttw = str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "—")
+    _ttd_ts = float(d.get("timing_last_event_ts", d.get("last_event_ts", 0.0)) or 0.0)
+    _ttw_ts = float(d.get("timing_last_event_ts_w", d.get("last_event_ts_w", 0.0)) or 0.0)
+    d_pending = bool(str(d.get("cb_pending_day_d") or "").strip())
+    w_pending = bool(str(d.get("cb_pending_week_w") or "").strip())
+    # Query-time fallback rows may not carry full cycle pending fields; keep CB as live in that case.
+    if _ttd.startswith("CB") and d.get("timing_state_name") == "LIVE BREAKOUT":
+        d_pending = True
+    if _ttw.startswith("CB") and d.get("timing_state_name_w") == "LIVE BREAKOUT":
+        w_pending = True
+    timing_state_d = _timing_state_from_tag(_ttd, d_pending)
+    timing_state_w = _timing_state_from_tag(_ttw, w_pending)
+
+    # RS Rating (0-100 percentile from the master scanner). Colour ramp: ≥80 strong (green),
+    # 60-79 neutral-green, 40-59 grey, <40 weak (red). `rs_rating` may be absent when SHM has
+    # not yet rolled the daily rank for a symbol — surface "—" so the UI doesn't render 0.
+    try:
+        _rsr_raw = d.get("rs_rating")
+        _rsr = int(_rsr_raw) if _rsr_raw is not None else None
+    except (TypeError, ValueError):
+        _rsr = None
+    if _rsr is None or _rsr <= 0:
+        rs_rating_ui, rs_rating_color = "—", "#888888"
+    else:
+        rs_rating_ui = str(_rsr)
+        if _rsr >= 80:
+            rs_rating_color = "#00FF00"
+        elif _rsr >= 60:
+            rs_rating_color = "#88FFAA"
+        elif _rsr >= 40:
+            rs_rating_color = "#D1D1D1"
+        else:
+            rs_rating_color = "#FF6666"
+
     d.update({
         'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': chp_color,
+        'rs_rating': rs_rating_ui, 'rs_rating_color': rs_rating_color,
         'rv': f"{rv:.2f}", 'rv_color': "#00FF00" if rv >= 1.5 else "#D1D1D1",
         'trend_text': "UP" if d.get('trend_up') else "DOWN", 'trend_color': "#00FF00" if d.get('trend_up') else "#FF3131",
         'ema_str': ema_d_str,
@@ -1133,9 +1774,82 @@ def format_ui_row(d):
         'ema_stack_tooltip': ema_stack_tooltip,
         'dual_tf_ema_stack_ok': bool(d.get("dual_tf_ema_stack_ok")),
         'stop_price': stop_disp,
+        'weekly_stop_price': weekly_stop_disp,
+        'atr9x2_state': atr_state_ui,
+        'atr9x2_color': atr_state_color,
         'udai_ui': udai_disp,
         'm_rsi2_ui': mrsi_ui,
         'm_rsi2_color': mrsi_color,
         'is_breakout': bool(d.get('is_breakout', False)),
+        'state_name': str(d.get("state_name") or "LOCKED"),
+        'last_tag': str(d.get("last_tag") or "—"),
+        'b_count': int(d.get("b_count", 0) or 0),
+        'e9t_count': int(d.get("e9t_count", 0) or 0),
+        'e21c_count': int(d.get("e21c_count", 0) or 0),
+        'rst_count': int(d.get("rst_count", 0) or 0),
+        'below21_count': int(d.get("below21_count", 0) or 0),
+        'state_name_w': str(d.get("state_name_w") or "LOCKED"),
+        'last_tag_w': str(d.get("last_tag_w") or "—"),
+        'b_count_w': int(d.get("b_count_w", 0) or 0),
+        'e9t_count_w': int(d.get("e9t_count_w", 0) or 0),
+        'e21c_count_w': int(d.get("e21c_count_w", 0) or 0),
+        'rst_count_w': int(d.get("rst_count_w", 0) or 0),
+        'below21_count_w': int(d.get("below21_count_w", 0) or 0),
+        'age_mins': (
+            f"{int(max(0.0, (time.time() - float(d.get('last_event_ts', 0.0) or 0.0)) / 60.0))}m"
+            if float(d.get('last_event_ts', 0.0) or 0.0) > 0 else "—"
+        ),
+        'age_mins_w': (
+            f"{int(max(0.0, (time.time() - float(d.get('last_event_ts_w', 0.0) or 0.0)) / 60.0))}m"
+            if float(d.get('last_event_ts_w', 0.0) or 0.0) > 0 else "—"
+        ),
+        'last_tag_color': (
+            "#00FF00" if str(d.get("last_tag", "")).startswith("B")
+            else "#1565C0" if _is_e9ct_tag(str(d.get("last_tag", "")))
+            else "#E65100" if _is_et9dn_wait_tag(str(d.get("last_tag", "")))
+            else "#6A1B9A" if str(d.get("last_tag", "")).startswith("E21C")
+            else "#C62828" if str(d.get("last_tag", "")).startswith("RST")
+            else "#888888"
+        ),
+        'last_tag_color_w': (
+            "#00FF00" if str(d.get("last_tag_w", "")).startswith("B")
+            else "#1565C0" if _is_e9ct_tag(str(d.get("last_tag_w", "")))
+            else "#E65100" if _is_et9dn_wait_tag(str(d.get("last_tag_w", "")))
+            else "#6A1B9A" if str(d.get("last_tag_w", "")).startswith("E21C")
+            else "#C62828" if str(d.get("last_tag_w", "")).startswith("RST")
+            else "#888888"
+        ),
+        'last_event_dt': _fmt_last_event_ist(d.get("last_event_ts")),
+        'last_event_dt_w': _fmt_last_event_ist(d.get("last_event_ts_w")),
+        'timing_last_tag': _ttd,
+        'timing_last_tag_w': _ttw,
+        'timing_last_event_dt': _fmt_last_event_ist(_ttd_ts),
+        'timing_last_event_dt_w': _fmt_last_event_ist(_ttw_ts),
+        'timing_state_name': timing_state_d,
+        'timing_state_name_w': timing_state_w,
+        'timing_last_tag_color': (
+            "#00FF00" if _ttd.startswith("B")
+            else "#00E5FF" if _ttd.startswith("CB")
+            else "#1565C0" if _is_e9ct_tag(_ttd)
+            else "#E65100" if _is_et9dn_wait_tag(_ttd)
+            else "#6A1B9A" if _ttd.startswith("E21C")
+            else "#C62828" if _ttd.startswith("RST")
+            else "#888888"
+        ),
+        'timing_last_tag_color_w': (
+            "#00FF00" if _ttw.startswith("B")
+            else "#00E5FF" if _ttw.startswith("CB")
+            else "#1565C0" if _is_e9ct_tag(_ttw)
+            else "#E65100" if _is_et9dn_wait_tag(_ttw)
+            else "#6A1B9A" if _ttw.startswith("E21C")
+            else "#C62828" if _ttw.startswith("RST")
+            else "#888888"
+        ),
+        'timing_age_mins': (
+            f"{int(max(0.0, (time.time() - _ttd_ts) / 60.0))}m" if _ttd_ts > 0 else "—"
+        ),
+        'timing_age_mins_w': (
+            f"{int(max(0.0, (time.time() - _ttw_ts) / 60.0))}m" if _ttw_ts > 0 else "—"
+        ),
     })
     return d

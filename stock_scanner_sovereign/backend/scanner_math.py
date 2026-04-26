@@ -303,7 +303,11 @@ class RSMathEngine:
 
         # 5. RCVR / weekly dynamics: OLS slope + optional weekly mRS signal line (SMA), Pine-style on *weekly* mRS.
         # Pine daily chart uses SMA(mRS,30) on *daily* mRS — we approximate with SMA over last N *weekly* mRS points.
+        # Docker “lite” preset sets MRS_RCVR_COMPUTE_ENABLED=0 — skips this block (grid filter “Below0↑” stays empty).
+        _rcvr_on = os.getenv("MRS_RCVR_COMPUTE_ENABLED", "1").strip().lower() in ("1", "true", "yes")
         try:
+            if not _rcvr_on:
+                raise RuntimeError("MRS_RCVR_COMPUTE_DISABLED")
             K = int(os.getenv("MRS_MANSFIELD_SLOPE_WEEKS", "10"))
             K = max(3, min(K, self.lookback_w - 1))
             Y = weekly_mrs_trailing_series(self.price_matrix_w, self.bench_prices_w, K)
@@ -363,7 +367,14 @@ class RSMathEngine:
             self.mrs_w_belowzero_rising = np.zeros(self.n, dtype=bool)
             self.mrs_w_belowzero_rising_latched = np.zeros(self.n, dtype=bool)
 
-        self._recompute_canslim_vectors()
+        if os.getenv("CANSLIM_ENABLED", "1").strip().lower() in ("1", "true", "yes"):
+            self._recompute_canslim_vectors()
+        else:
+            self.canslim_weekly_ok[:] = False
+            self.canslim_daily_ok[:] = False
+            self.canslim_n_pass[:] = False
+            self.canslim_l_pass[:] = False
+            self.canslim_m_ok = False
 
         return self.mrs_results, self.mrs_daily, self.rs_ratings
 

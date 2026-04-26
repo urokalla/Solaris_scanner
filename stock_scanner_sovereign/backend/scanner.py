@@ -10,6 +10,7 @@ from backend.scanner_shm import SHMBridge
 from backend.scanner_math import RSMathEngine
 from utils.scanner_analysis import compute_trading_profile, profile_label_to_shm
 from utils.constants import BENCHMARK_MAP
+from utils.mrs_weekly_dynamics import weekly_mrs_trailing_series, weeks_since_last_mrs_zero_cross_up
 from psycopg2.extras import execute_values
 
 # Environment-Agnostic Logging (Relative to script location)
@@ -161,6 +162,7 @@ class MasterScanner:
         try:
             self.db.ensure_live_state_brk_column()
             self.db.ensure_mrs_prev_day_column()
+            self.db.ensure_live_state_mrs_0_cross_unix_column()
             self.db.ensure_rs_prev_day_column()
             self.db.ensure_w_rsi2_column()
         except Exception as e:
@@ -234,6 +236,8 @@ class MasterScanner:
         self.ws = None
         # Master-only: session BUY NOW latch + prior-day mRS cache (dashboard reads SHM written by master)
         self._buy_session_latch: set[str] = set()
+        # Last time weekly mRS crossed above 0 (master runtime + live_state.mrs_0_cross_unix for dashboard).
+        self._mrs_zero_cross_up_ts: dict[str, float] = {}
         self._last_ist_trading_date = None
         self._mrs_prev_day_cache: dict[str, float] = {}
         self._mrs_prev_day_cache_ts: float = 0.0
@@ -930,6 +934,46 @@ class MasterScanner:
         finally:
             self._w_rsi2_ts = time.time()
 
+    def _persist_mrs_0_cross_unix(self, sym: str, ts: float) -> None:
+        """Dashboard runs SHM_SLAVE — only the master scanner should write cross timestamps to Postgres."""
+        if not getattr(self.shm, "is_master", False):
+            return
+        try:
+            self.db.upsert_mrs_0_cross_unix(sym, ts)
+        except Exception as ex:
+            logger.warning("mrs_0_cross_unix persist failed for %s: %s", sym, ex)
+
+    def _batch_fill_mrs_0_cross_unix_from_weekly_history(self) -> None:
+        """
+        TRENDING rows rarely hit the tick latch, so live_state stayed NULL and RS_0_CROSS_AGE was all dashes.
+        Approximate last weekly mRS>0 cross from the same trailing window as Mansfield math; only fills NULL.
+        """
+        if not getattr(self.shm, "is_master", False):
+            return
+        try:
+            pm = getattr(self.math, "price_matrix_w", None)
+            br = getattr(self.math, "bench_prices_w", None)
+            if pm is None or br is None or not hasattr(pm, "shape") or pm.ndim != 2 or br.ndim != 1:
+                return
+            H = int(pm.shape[1])
+            if H < 3:
+                return
+            K = max(3, min(52, H - 1))
+            Y = weekly_mrs_trailing_series(pm, br, K)
+            wk = weeks_since_last_mrs_zero_cross_up(Y)
+            now_t = time.time()
+            n = min(int(pm.shape[0]), len(self.symbols), int(wk.shape[0]))
+            rows: list[tuple[str, float]] = []
+            for i in range(n):
+                w = int(wk[i])
+                if w < 0:
+                    continue
+                rows.append((self.symbols[i], now_t - float(w) * 7.0 * 86400.0))
+            if rows:
+                self.db.upsert_mrs_0_cross_unix_fill_if_null_batch(rows)
+        except Exception as ex:
+            logger.warning("batch mrs_0_cross_unix fill from history failed: %s", ex, exc_info=True)
+
     def _compute_grid_status(self, sym: str, prev_mrs: float, new_mrs: float, mrs_prev_day: Optional[float]) -> bytes:
         """
         BUY NOW: session-latched after weekly mRS crosses above 0, or first day above 0 vs prior EOD <= 0.
@@ -949,11 +993,17 @@ class MasterScanner:
         if sym in self._buy_session_latch:
             return b"BUY NOW"
         if p <= 0:
+            _ts = time.time()
+            self._mrs_zero_cross_up_ts[sym] = _ts
+            self._persist_mrs_0_cross_unix(sym, _ts)
             self._buy_session_latch.add(sym)
             return b"BUY NOW"
         if mrs_prev_day is not None and mrs_prev_day > 0:
             return b"TRENDING"
         if mrs_prev_day is not None and mrs_prev_day <= 0:
+            _ts = time.time()
+            self._mrs_zero_cross_up_ts[sym] = _ts
+            self._persist_mrs_0_cross_unix(sym, _ts)
             self._buy_session_latch.add(sym)
             return b"BUY NOW"
         return b"TRENDING"
@@ -1340,6 +1390,34 @@ class MasterScanner:
                     return
                 self._ui_db_cache[name] = {"ts": now_ts, "key": cache_key, "val": value}
 
+            zm = _ui_cache_get("mrs0cross")
+            if zm is None:
+                zm = self.db.get_mrs_0_cross_unix_map(syms) if syms else {}
+                _ui_cache_set("mrs0cross", zm)
+
+            for d in data:
+                sym = str(d.get("symbol", ""))
+                mem = float(self._mrs_zero_cross_up_ts.get(sym, 0.0) or 0.0)
+                dbv = float(zm.get(sym, 0.0) or 0.0)
+                ts = max(mem, dbv) if (mem > 0 or dbv > 0) else 0.0
+                if ts <= 0:
+                    d["zero_cross_age"] = "—"
+                    d["zero_cross_age_days"] = None
+                else:
+                    days_f = max(0.0, (now_ts - ts) / 86400.0)
+                    d["zero_cross_age_days"] = float(days_f)
+                    days = int(days_f)
+                    if days <= 0:
+                        d["zero_cross_age"] = "0d"
+                    elif days < 7:
+                        d["zero_cross_age"] = f"{days}d"
+                    else:
+                        weeks = days // 7
+                        if weeks < 5:
+                            d["zero_cross_age"] = f"{weeks}w"
+                        else:
+                            d["zero_cross_age"] = f"{days}d"
+
             # Layer 3: pivot from live_state (written by BreakoutScanner / sidecar), not SHM dtype
             try:
                 bm = _ui_cache_get("brk")
@@ -1428,61 +1506,72 @@ class MasterScanner:
                         d["ad_ratio"] = float(v[1])
             except Exception as ex:
                 logger.debug("A/D merge on main grid skipped: %s", ex)
-            try:
-                eps_ca = self._get_screener_eps_canslim_ca_map()
-                _lp = getattr(self.math, "canslim_l_pass", None)
-                _np = getattr(self.math, "canslim_n_pass", None)
-                _m_ok = bool(getattr(self.math, "canslim_m_ok", False))
+            canslim_on = os.getenv("CANSLIM_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+            if not canslim_on:
                 for d in data:
-                    sym = d["symbol"]
-                    idx = self.sym_to_idx.get(sym)
-                    sk = _dashboard_sym_key(sym)
-                    pair = eps_ca.get(sk)
-                    if pair is None:
-                        c_ok, a_ok = False, False
-                    else:
-                        c_ok, a_ok = bool(pair[0]), bool(pair[1])
-                    s_ok = str(d.get("ad_grade") or "").strip().upper() in ("A", "B")
-                    l_ok = bool(_lp[idx]) if _lp is not None and idx is not None and 0 <= idx < len(_lp) else False
-                    n_ok = bool(_np[idx]) if _np is not None and idx is not None and 0 <= idx < len(_np) else False
-                    m_ok = _m_ok
-                    score = int(c_ok) + int(a_ok) + int(s_ok) + int(l_ok) + int(m_ok) + int(n_ok)
-                    br = []
-                    for ok, lab in (
-                        (c_ok, "C Q EPS+"),
-                        (a_ok, "A ann EPS+"),
-                        (s_ok, "S A/D"),
-                        (l_ok, "L RS+mRS+chart"),
-                        (m_ok, "M market"),
-                        (n_ok, "N near high"),
-                    ):
-                        br.append(f"{lab}: {'ok' if ok else '—'}")
-                    tip = "CANSLIM-style checklist (6) — not investment advice.\n" + " · ".join(br)
-                    if score >= 6:
-                        icon, tier, band = "★", "Favor buy", "strong"
-                    elif score == 5:
-                        icon, tier, band = "✓", "Validated", "good"
-                    elif score == 4:
-                        icon, tier, band = "◐", "Keep watch", "track"
-                    else:
-                        icon, tier, band = "○", "Weak", "weak"
-                    d["canslim_score"] = score
-                    d["canslim_str"] = f"{score}/6"
-                    d["canslim_icon"] = icon
-                    d["canslim_tier"] = tier
-                    d["canslim_band"] = band
-                    d["canslim_cell"] = f"{icon} {score}/6 · {tier}"
-                    d["canslim_tip"] = tip
-            except Exception as ex:
-                logger.debug("CANSLIM merge on main grid skipped: %s", ex)
-                for d in data:
-                    d.setdefault("canslim_score", 0)
-                    d.setdefault("canslim_str", "0/6")
-                    d.setdefault("canslim_icon", "○")
-                    d.setdefault("canslim_tier", "Weak")
-                    d.setdefault("canslim_cell", "○ 0/6 · Weak")
-                    d.setdefault("canslim_band", "weak")
-                    d.setdefault("canslim_tip", "")
+                    d["canslim_score"] = 0
+                    d["canslim_str"] = "0/6"
+                    d["canslim_icon"] = "○"
+                    d["canslim_tier"] = "Weak"
+                    d["canslim_cell"] = "○ 0/6 · Weak"
+                    d["canslim_band"] = "weak"
+                    d["canslim_tip"] = ""
+            else:
+                try:
+                    eps_ca = self._get_screener_eps_canslim_ca_map()
+                    _lp = getattr(self.math, "canslim_l_pass", None)
+                    _np = getattr(self.math, "canslim_n_pass", None)
+                    _m_ok = bool(getattr(self.math, "canslim_m_ok", False))
+                    for d in data:
+                        sym = d["symbol"]
+                        idx = self.sym_to_idx.get(sym)
+                        sk = _dashboard_sym_key(sym)
+                        pair = eps_ca.get(sk)
+                        if pair is None:
+                            c_ok, a_ok = False, False
+                        else:
+                            c_ok, a_ok = bool(pair[0]), bool(pair[1])
+                        s_ok = str(d.get("ad_grade") or "").strip().upper() in ("A", "B")
+                        l_ok = bool(_lp[idx]) if _lp is not None and idx is not None and 0 <= idx < len(_lp) else False
+                        n_ok = bool(_np[idx]) if _np is not None and idx is not None and 0 <= idx < len(_np) else False
+                        m_ok = _m_ok
+                        score = int(c_ok) + int(a_ok) + int(s_ok) + int(l_ok) + int(m_ok) + int(n_ok)
+                        br = []
+                        for ok, lab in (
+                            (c_ok, "C Q EPS+"),
+                            (a_ok, "A ann EPS+"),
+                            (s_ok, "S A/D"),
+                            (l_ok, "L RS+mRS+chart"),
+                            (m_ok, "M market"),
+                            (n_ok, "N near high"),
+                        ):
+                            br.append(f"{lab}: {'ok' if ok else '—'}")
+                        tip = "CANSLIM-style checklist (6) — not investment advice.\n" + " · ".join(br)
+                        if score >= 6:
+                            icon, tier, band = "★", "Favor buy", "strong"
+                        elif score == 5:
+                            icon, tier, band = "✓", "Validated", "good"
+                        elif score == 4:
+                            icon, tier, band = "◐", "Keep watch", "track"
+                        else:
+                            icon, tier, band = "○", "Weak", "weak"
+                        d["canslim_score"] = score
+                        d["canslim_str"] = f"{score}/6"
+                        d["canslim_icon"] = icon
+                        d["canslim_tier"] = tier
+                        d["canslim_band"] = band
+                        d["canslim_cell"] = f"{icon} {score}/6 · {tier}"
+                        d["canslim_tip"] = tip
+                except Exception as ex:
+                    logger.debug("CANSLIM merge on main grid skipped: %s", ex)
+                    for d in data:
+                        d.setdefault("canslim_score", 0)
+                        d.setdefault("canslim_str", "0/6")
+                        d.setdefault("canslim_icon", "○")
+                        d.setdefault("canslim_tier", "Weak")
+                        d.setdefault("canslim_cell", "○ 0/6 · Weak")
+                        d.setdefault("canslim_band", "weak")
+                        d.setdefault("canslim_tip", "")
             try:
                 an_map = self._get_recent_announcements_map()
                 if an_map:
@@ -1495,6 +1584,29 @@ class MasterScanner:
                         d["ann_desc"] = v[1]
             except Exception as ex:
                 logger.debug("Announcements merge on main grid skipped: %s", ex)
+
+            xage_f = str(
+                filters.get("zero_cross_age") or filters.get("cross_age") or "ALL"
+            ).strip().upper()
+            if xage_f in ("HAS", "LE7", "LE30", "LE90", "UNK", "UNKNOWN"):
+                if xage_f == "UNKNOWN":
+                    xage_f = "UNK"
+
+                def _xage_ok(row):
+                    dd = row.get("zero_cross_age_days")
+                    if xage_f == "HAS":
+                        return dd is not None
+                    if xage_f == "UNK":
+                        return dd is None
+                    if xage_f == "LE7":
+                        return dd is not None and float(dd) <= 7.0
+                    if xage_f == "LE30":
+                        return dd is not None and float(dd) <= 30.0
+                    if xage_f == "LE90":
+                        return dd is not None and float(dd) <= 90.0
+                    return True
+
+                data = [d for d in data if _xage_ok(d)]
 
             sort_key = str(filters.get("sort_key") or "rs_rating").strip().lower()
             sort_desc = bool(filters.get("sort_desc", True))
@@ -1537,6 +1649,15 @@ class MasterScanner:
                     return str(row["status"])
                 if sort_key in ("prf", "profile"):
                     return str(row["profile"])
+                if sort_key in (
+                    "zero_cross_age",
+                    "zero_cross_age_days",
+                    "cross_age",
+                    "rs_0_cross_age",
+                    "zc_age",
+                ):
+                    x = row.get("zero_cross_age_days")
+                    return float(x) if x is not None else float("-inf")
                 return int(row["rs_rating"])
 
             data.sort(key=_sort_key, reverse=sort_desc)
@@ -1666,6 +1787,7 @@ class MasterScanner:
                 )
                 target["rv"] = float(self.math.compute_rvol(i))
             
+            self._batch_fill_mrs_0_cross_unix_from_weekly_history()
             logger.info("✅ [Scanner] Physical memory pre-load complete. Committing state to backend.")
             
             # Step 1: Build the Ratings Dictionary for Persistence
@@ -1989,6 +2111,7 @@ class MasterScanner:
                                 if r['heartbeat'] == 0: r['heartbeat'] = time.time()
                             except: continue
                         
+                        self._batch_fill_mrs_0_cross_unix_from_weekly_history()
                         # 3. Final Universal Persistence (X-Ray of the Universe)
                         self.persist_to_postgres()
                         self._snapshot_eod_mrs_prev_day_if_due()

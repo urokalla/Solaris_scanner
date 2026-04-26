@@ -1,6 +1,6 @@
 import json
 import os
-import reflex as rx, asyncio, time
+import reflex as rx
 from urllib.parse import quote
 
 from .engine import get_scanner
@@ -49,6 +49,7 @@ class State(rx.State):
     benchmark_name, benchmark, status_message = "Nifty 50", "NSE:NIFTY50-INDEX", "Ready"
     result_count, current_page, page_size, total_pages = 0, 1, 50, 1
     search_query, filter_profile, filter_status, filter_mrs, filter_rv = "", "ALL", "ALL", "ALL", "ALL"
+    filter_cross_age: str = "ALL"
     filter_mrs_rcvr: str = "ALL"
     grid_sort_key: str = "rs_rating"
     grid_sort_desc: bool = True
@@ -56,19 +57,27 @@ class State(rx.State):
     # Per PROFILE tab: {"ALL": {"sort_key":..., "filter_status":...}, "ELITE": {...}}
     main_profile_prefs_json: str = "{}"
 
-    def on_load(self):
+    async def on_load(self):
+        """Prod Reflex expects `return` of a background event; sync `yield` can skip polling."""
         from utils.constants import DASHBOARD_BENCHMARK_MAP
-        if self.benchmark_name not in DASHBOARD_BENCHMARK_MAP:
-            self.benchmark_name = "Nifty 50"
-            self.benchmark = DASHBOARD_BENCHMARK_MAP["Nifty 50"]
-            get_scanner().update_params(benchmark=self.benchmark)
-        if self.grid_sort_key in ("canslim_score", "cs", "canslim"):
-            self.grid_sort_key = "rs_rating"
-        yield State.poll_results
+        need_bench_update = False
+        async with self:
+            if self.benchmark_name not in DASHBOARD_BENCHMARK_MAP:
+                self.benchmark_name = "Nifty 50"
+                self.benchmark = DASHBOARD_BENCHMARK_MAP["Nifty 50"]
+                need_bench_update = True
+            if self.grid_sort_key in ("canslim_score", "cs", "canslim", "brk_lvl"):
+                self.grid_sort_key = "rs_rating"
+        if need_bench_update:
+            async with self:
+                b = self.benchmark
+            get_scanner().update_params(benchmark=b)
+        return State.poll_results
     def set_universe(self, u):
         # Breakout engine syncs when opening /breakout (avoid heavy reset + races from main page).
         self.universe, self.current_page = u, 1
         self.filter_mrs_rcvr = "ALL"
+        self.filter_cross_age = "ALL"
         get_scanner(universe=u)
 
     def set_dashboard_sector(self, v: str):
@@ -103,6 +112,7 @@ class State(rx.State):
             "filter_status": self.filter_status,
             "filter_mrs": self.filter_mrs,
             "filter_rv": self.filter_rv,
+            "filter_cross_age": self.filter_cross_age,
             "filter_mrs_rcvr": self.filter_mrs_rcvr,
             "search_query": self.search_query,
         }
@@ -120,13 +130,15 @@ class State(rx.State):
         loaded = self._main_profile_prefs_dict().get(p)
         if isinstance(loaded, dict):
             sk = str(loaded.get("sort_key", "rs_rating"))
-            if sk in ("canslim_score", "cs", "canslim"):
+            if sk in ("canslim_score", "cs", "canslim", "brk_lvl"):
                 sk = "rs_rating"
             self.grid_sort_key = sk
             self.grid_sort_desc = bool(loaded.get("sort_desc", True))
             self.filter_status = str(loaded.get("filter_status", "ALL"))
             self.filter_mrs = str(loaded.get("filter_mrs", "ALL"))
             self.filter_rv = str(loaded.get("filter_rv", "ALL"))
+            fca = str(loaded.get("filter_cross_age", "ALL")).strip().upper()
+            self.filter_cross_age = fca if fca in ("ALL", "HAS", "LE7", "LE30", "LE90", "UNK") else "ALL"
             fmr = str(loaded.get("filter_mrs_rcvr", "ALL"))
             self.filter_mrs_rcvr = fmr if fmr in ("ALL", "BELOW0_RISING") else "ALL"
             self.search_query = str(loaded.get("search_query", ""))
@@ -136,6 +148,7 @@ class State(rx.State):
             self.filter_status = "ALL"
             self.filter_mrs = "ALL"
             self.filter_rv = "ALL"
+            self.filter_cross_age = "ALL"
             self.filter_mrs_rcvr = "ALL"
             self.search_query = ""
         self.current_page = 1
@@ -143,6 +156,11 @@ class State(rx.State):
     def set_filter_status(self, v): self.filter_status, self.current_page = v, 1
     def set_filter_mrs(self, v): self.filter_mrs, self.current_page = v, 1
     def set_filter_rv(self, v): self.filter_rv, self.current_page = v, 1
+
+    def set_filter_cross_age(self, v: str):
+        s = str(v or "ALL").strip().upper()
+        self.filter_cross_age = s if s in ("ALL", "HAS", "LE7", "LE30", "LE90", "UNK") else "ALL"
+        self.current_page = 1
 
     def set_filter_mrs_rcvr(self, v):
         s = (v or "ALL").strip()
@@ -172,8 +190,8 @@ class State(rx.State):
             "Ticker": "symbol",
             "Status": "status",
             "Profile": "profile",
-            "BRK": "brk_lvl",
             "A/D": "ad_grade",
+            "RS_0_CROSS_AGE": "zero_cross_age_days",
         }
         key = m.get(str(label or "").strip(), "rs_rating")
         if self.grid_sort_key == key:
@@ -249,12 +267,6 @@ class State(rx.State):
         return "▼" if self.grid_sort_desc else "▲"
 
     @rx.var
-    def grid_sort_arrow_brk(self) -> str:
-        if self.grid_sort_key != "brk_lvl":
-            return ""
-        return "▼" if self.grid_sort_desc else "▲"
-
-    @rx.var
     def grid_sort_arrow_ad(self) -> str:
         if self.grid_sort_key != "ad_grade":
             return ""
@@ -273,6 +285,12 @@ class State(rx.State):
         return "▼" if self.grid_sort_desc else "▲"
 
     @rx.var
+    def grid_sort_arrow_cross_age(self) -> str:
+        if self.grid_sort_key != "zero_cross_age_days":
+            return ""
+        return "▼" if self.grid_sort_desc else "▲"
+
+    @rx.var
     def grid_sort_field_select_label(self) -> str:
         rev = {
             "rs_rating": "RS",
@@ -287,7 +305,6 @@ class State(rx.State):
             "symbol": "Ticker",
             "status": "Status",
             "profile": "Profile",
-            "brk_lvl": "BRK",
             "ad_grade": "A/D",
         }
         return rev.get(self.grid_sort_key, "RS")
@@ -313,6 +330,34 @@ class State(rx.State):
     def download_excel(self): 
         try: return download_excel_logic(self.scanner_results)
         except Exception as e: return rx.window_alert(f"Export Error: {e}")
+
+    async def _sync_breakout_sidecars(self, universe: str):
+        """Keep shared breakout engine + Breakout / Breakout-timing Reflex state aligned."""
+        from .breakout_engine_manager import get_breakout_scanner
+        from .breakout_state import BreakoutState
+        from .breakout_timing_state import BreakoutTimingState
+
+        get_breakout_scanner(universe=universe).update_universe(universe, None)
+        bs = await self.get_state(BreakoutState)
+        bts = await self.get_state(BreakoutTimingState)
+        async with bs:
+            bs.universe = universe
+        async with bts:
+            bts.universe = universe
+
+    async def open_sidecar_full_universe(self):
+        """Open breakout sidecar with the full Nifty list for the current main universe (no profile subset)."""
+        async with self:
+            u = self.universe
+        await self._sync_breakout_sidecars(u)
+        return rx.redirect("/breakout")
+
+    async def open_breakout_timing_full_universe(self):
+        """Open breakout clock with the full Nifty list for the current main universe (no profile subset)."""
+        async with self:
+            u = self.universe
+        await self._sync_breakout_sidecars(u)
+        return rx.redirect("/breakout-timing")
 
     def open_tradingview(self, symbol: str):
         """Open TradingView chart (NSE) in a new tab."""
@@ -357,8 +402,6 @@ class State(rx.State):
         rv,
         profile: str,
         status: str,
-        brk_lvl_str: str,
-        mrs_rcvr_str: str,
         w_rsi2_str: str,
     ):
         """Key technicals already in this scanner (not P/E or balance sheet — use sc → Screener)."""
@@ -369,8 +412,7 @@ class State(rx.State):
             f"W_mRS: {mrs_str}  |  Prior EOD mRS: {mrs_prev_day_str}\n"
             f"D_mRS: {mrs_daily_str}  |  RVOL: {rv}\n"
             f"W_RSI2: {w_rsi2_str}  (weekly Wilder RSI period 2)\n"
-            f"Profile: {profile}  |  Status: {status}\n"
-            f"BRK: {brk_lvl_str}  |  RCVR: {mrs_rcvr_str}\n\n"
+            f"Profile: {profile}  |  Status: {status}\n\n"
             "For PE, ROE, debt, results → click [sc] (Screener.in)."
         )
         return rx.window_alert(msg)

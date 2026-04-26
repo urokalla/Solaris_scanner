@@ -1,0 +1,105 @@
+//@version=5
+indicator("Udai Trend identification-Corrected", overlay=true, max_labels_count=500)
+
+// --------------------------------------------------------------------------------
+// 1. INPUTS & COLORS
+// --------------------------------------------------------------------------------
+ema9Len   = input.int(9, "EMA 9 Period")
+ema21Len  = input.int(21, "EMA 21 Period")
+donLen    = input.int(10, "Donchian Lookback")
+rstN      = input.int(2, "Reset Count (Bars < EMA21)")
+
+c_B    = #2E7D32
+c_E9T  = #1565C0
+c_ETDN = #E65100
+c_E21C = #6A1B9A
+c_RST  = #C62828
+
+// --------------------------------------------------------------------------------
+// 2. CALCULATIONS
+// --------------------------------------------------------------------------------
+ema9  = ta.ema(close, ema9Len)
+ema21 = ta.ema(close, ema21Len)
+donHi = ta.highest(high[1], donLen)
+
+// --- State Variables ---
+var int state      = 0 // 0=LOCKED (Post-RST), 1=TRENDING, 2=PULLBACK
+var int bCount     = 0
+var int e9tCount   = 0
+var int e21cCount  = 0
+var int below21    = 0
+
+// Process only confirmed bars (prevents live-bar flicker/moving labels)
+confirmed = barstate.isconfirmed
+
+// --------------------------------------------------------------------------------
+// 3. RESET LOGIC (The Kill Switch)
+// --------------------------------------------------------------------------------
+if confirmed
+    if close < ema21
+        below21 += 1
+    else
+        below21 := 0
+
+    // Once RST hits, state becomes 0. NO labels can print in State 0.
+    if state > 0 and below21 >= rstN
+        label.new(bar_index, high, "RST", yloc=yloc.abovebar, color=c_RST, textcolor=color.white, style=label.style_label_down, size=size.small)
+        state := 0
+        bCount := 0
+        e9tCount := 0
+        e21cCount := 0
+
+// --------------------------------------------------------------------------------
+// 4. BREAKOUT LOGIC (The Only Key to Unlock)
+// --------------------------------------------------------------------------------
+isBreakout = confirmed and ta.crossover(close, donHi) and close > ema9 and ema9 > ema21
+
+if isBreakout
+    state := 1
+    bCount += 1
+
+    // Handle "Power Bars": Breakout and EMA9 Test on the same candle
+    bText = "B" + str.tostring(bCount)
+    if low <= ema9
+        bText := bText + "+E9CT"
+
+    label.new(bar_index, low, bText, yloc=yloc.belowbar, color=c_B, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// --------------------------------------------------------------------------------
+// 5. CYCLE MANAGEMENT (Only runs if a Breakout has happened)
+// --------------------------------------------------------------------------------
+if confirmed and state > 0
+    // A. Intra-Bar Reclaim (wicked below 9, closed above 9)
+    // Skip if already a Breakout bar to avoid double labels
+    if state == 1 and low < ema9 and close > ema9 and not isBreakout
+        e9tCount += 1
+        label.new(bar_index, low, "E9CT" + str.tostring(e9tCount), yloc=yloc.belowbar, color=c_E9T, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+    // B. Entering Pullback (Close below 9)
+    else if state == 1 and close < ema9
+        state := 2
+        label.new(bar_index, high, "ET9DNWF21C", yloc=yloc.abovebar, color=c_ETDN, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+    // C. Reclaiming from Pullback
+    if state == 2 and close > ema9
+        state := 1
+
+        // ULTRA-STRICT GEOGRAPHY: near EMA21 and deeper than EMA9 zone
+        touching21 = low <= (ema21 * 1.002) or low[1] <= (ema21[1] * 1.002)
+        deepZone   = math.abs(low - ema21) < math.abs(low - ema9)
+
+        if touching21 and deepZone
+            e21cCount += 1
+            label.new(bar_index, low, "E21C" + str.tostring(e21cCount), yloc=yloc.belowbar, color=c_E21C, textcolor=color.white, style=label.style_label_up, size=size.small)
+        else
+            e9tCount += 1
+            label.new(bar_index, low, "E9CT" + str.tostring(e9tCount), yloc=yloc.belowbar, color=c_E9T, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// --------------------------------------------------------------------------------
+// 6. VISUALS
+// --------------------------------------------------------------------------------
+plot(ema9, "EMA 9 (Blue)", color=color.new(c_E9T, 40), linewidth=1)
+plot(ema21, "EMA 21 (Black)", color=color.new(color.black, 0), linewidth=2)
+plot(donHi, "Donchian Ceiling", color=color.new(color.gray, 70), style=plot.style_stepline)
+
+bgcolor(state == 1 ? color.new(c_B, 98) : state == 2 ? color.new(c_ETDN, 98) : na)

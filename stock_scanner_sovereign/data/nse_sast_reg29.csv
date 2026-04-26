@@ -1,44 +1,26 @@
-symbol,raw_company,raw_acquirerName,raw_promoterType,txn_type,raw_noOfShareAcq,raw_noOfShareSale,raw_timestamp
-OSIAHYPER,Osia Hyper Retail Limited,Kavita Dhirendrakumar Chopra,Y,Sale,,2500000,17-Apr-2026 18:09
-OSIAHYPER,Osia Hyper Retail Limited,Dhirendrakumar Gautamkumar Chopra,Y,Sale,,6390392,17-Apr-2026 18:09
-SHAILY,Shaily Engineering Plastics Limited,"SMALLCAP World Fund, Inc.",N,Acquisition,983425,,17-Apr-2026 18:02
-SUDARSCHEM,Sudarshan Chemical Industries Limited,Pradeep Ramwilas Rathi,N,Sale,,786119,17-Apr-2026 18:00
-SUDARSCHEM,Sudarshan Chemical Industries Limited,Rahul Pradeep Rathi,N,Sale,,786119,17-Apr-2026 18:00
-NAVINFLUOR,Navin Fluorine International Limited,Life Insurance Corporation of India,N,Sale,,1032341,17-Apr-2026 17:59
-OMAXE,Omaxe Limited,Guild Builders Private Limited,Y,Acquisition,0,,17-Apr-2026 17:59
-TIL,TIL Limited,TIL Global Private Ltd,Y,Acquisition,1209176,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Aditi Athavankar,Y,Acquisition,8000,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Venkataraman Rajamani,Y,Acquisition,1315000,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Aditi Avinash Athavankar (in the capacity as Trustee of Kalki Family Private Trust),Y,Acquisition,720000,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Orpheus Trading Private Limited,Y,Acquisition,225540,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Nirmal Bhanwarlal Jain,Y,Acquisition,3102544,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Ardent Impex Private Limited,Y,Acquisition,468429,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Mansukhlal Jain & Pritesh Mehta (in their capacity as Trustee of Nirmal Madhu Family Private Trust),Y,Acquisition,65059,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Harshita Nirmal Jain,Y,Acquisition,45195,,17-Apr-2026 10:55
-5PAISA,5Paisa Capital Limited,Madhu N Jain,Y,Acquisition,922508,,17-Apr-2026 10:55
-TIL,TIL Limited,TIL Global Private Ltd,Y,Acquisition,1209176,,17-Apr-2026 10:54
-HINDZINC,Hindustan Zinc Limited,AXIS TRUSTEE SERVICES LIMITED,N,Acquisition,0,,17-Apr-2026 10:51
-DPABHUSHAN,D. P. Abhushan Limited,Santosh Ratanlal Kataria HUF along with pac,Y,Acquisition,0,,17-Apr-2026 10:51
-DPABHUSHAN,D. P. Abhushan Limited,Santosh Kataria,Y,Acquisition,0,,17-Apr-2026 10:50
-PENIND,Pennar Industries Limited,Bandhan Mutual Fund,N,Acquisition,120000,,17-Apr-2026 10:49
-AFFORDABLE,Affordable Robotic & Automation Limited,Atri Energy Transition Private Limited,N,Acquisition,604839,,17-Apr-2026 10:48
-PCJEWELLER,PC Jeweller Limited,Pooja Garg,Y,Acquisition,216001000,,16-Apr-2026 10:50
-SYNGENE,Syngene International Limited,Nippon India Mutual Fund,N,Acquisition,1600307,,16-Apr-2026 10:50
-LIBAS,Libas Consumer Products Limited,Riyaz Ganji,Y,Acquisition,101272,,16-Apr-2026 10:49
-IXIGO,Le Travenues Technology Limited,GIC Private Limited (GIC) on account of Government of Singapore (GOS),N,Sale,,211900,16-Apr-2026 10:48
-IXIGO,Le Travenues Technology Limited,GIC Private Limited (GIC) on account of Government of the Monetary Authority of Singapore (MAS),N,Sale,,21646,16-Apr-2026 10:48
-IXIGO,Le Travenues Technology Limited,GIC Private Limited (GIC) on account of Government of Gamnat Pte Ltd (Gamnat),N,Sale,,0,16-Apr-2026 10:48
-NEOGEN,Neogen Chemicals Limited,Axis Trustee Services Limited (ATSL) acting as Pledgee,N,Acquisition,2019167,,16-Apr-2026 10:48
-MBLINFRA,MBL Infrastructure Limited,Anjanee Kumar Lakhotia and entities forming part of Promoters & promoter Group,Y,Acquisition,1900000,,16-Apr-2026 10:47
-ELLEN,Ellenbarrie Industrial Gases Limited,"Motilal Oswal Balanced Advantage Fund, Motilal Oswal Nifty Microcap 250 Index Fund, Motilal Oswal Multi Cap Fund, Motilal Oswal Business Cycle Fund",N,Sale,,173385,16-Apr-2026 10:46
-VISASTEEL,Visa Steel Limited,VISA Industries Limited,Y,Acquisition,16500000,,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Zulfiqar Ahmad Qurashi,Y,Sale,,7141000,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Wajid Ahmed,Y,Sale,,7501630,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Mohammad Ashraf Qureshi,Y,Sale,,7141000,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Mohammad Mehmood Qureshi,Y,Sale,,7141000,16-Apr-2026 10:45
-HMAAGRO,Hma Agro Industries Limited,Gulzar Ahmad,Y,Sale,,4256543,16-Apr-2026 10:45
-SPICEJET,SPICEJET LTD,Authum Investment & Infrastructure Limited,N,Acquisition,23107588,,16-Apr-2026 10:44
-SEDEMAC,SEDEMAC Mechatronics Limited,360 ONE Alternates Asset Management Limited,N,Sale,,897861,16-Apr-2026 10:44
-DBSTOCKBRO,DB (International) Stock Brokers Limited,Roopam Financers Private Limited,N,Acquisition,713308,,16-Apr-2026 10:43
-DELHIVERY,Delhivery Limited,"Nexus Ventures III, Limited",N,Sale,,20736954,16-Apr-2026 10:42
-DELHIVERY,Delhivery Limited,Nexus Opportunity Fund Limited,N,Sale,,3263046,16-Apr-2026 10:42
+symbol,raw_company,raw_acquirerName,raw_promoterType,txn_type,raw_noOfShareAcq,raw_noOfShareSale,raw_timestamp,first_seen_utc,last_refreshed_utc,fetched_at_utc,is_new
+DEEPAKFERT,Deepak Fertilizers And Petrochemicals Corporation Limited,SCM Commercial Private Limited,Y,Acquisition,7400000,,23-Apr-2026 20:55,2026-04-23 15:27:34 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+GAYAPROJ,Gayatri Projects Limited,T.V.Sandeep Kumar Reddy,Y,Acquisition,100000000,,23-Apr-2026 20:54,2026-04-23 15:27:34 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+CARERATING,CARE Ratings Limited,"Pari Washington India Master Fund, Ltd",N,Sale,,76817,23-Apr-2026 20:54,2026-04-23 15:24:32 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+GAYAPROJ,Gayatri Projects Limited,"Vivek Mundra, Aniruddh Mundra",N,Acquisition,24000000,,23-Apr-2026 20:53,2026-04-23 15:24:32 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+DEEPAKFERT,Deepak Fertilizers And Petrochemicals Corporation Limited,Robust Marketing Services Private Limited,Y,Sale,,7400000,23-Apr-2026 20:53,2026-04-23 15:24:32 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+TEJASNET,Tejas Networks Limited,Nippon India Mutual Fund,N,Sale,,214882,23-Apr-2026 20:52,2026-04-23 15:24:32 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JIOFIN,Jio Financial Services Limited,Jamnagar Utilities & Power Private Limited,Y,Acquisition,125000000,,23-Apr-2026 14:18,2026-04-23 08:51:17 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+JIOFIN,Jio Financial Services Limited,Sikka Ports & Terminals Limited,Y,Acquisition,125000000,,23-Apr-2026 14:18,2026-04-23 08:51:17 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+INNOVISION,Innovision Limited,"Neomile Corporate Advisory Limited, Kirtan Rupareliya, Neomile Growth Fund Series I, Neomile India Opportunity Fund",N,Acquisition,1691738,,23-Apr-2026 14:18,2026-04-23 08:51:17 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+INNOVISION,Innovision Limited,"Neomile Corporate Advisory Ltd,",N,Acquisition,1691738,,23-Apr-2026 10:42,2026-04-23 05:15:07 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+YESBANK,Yes Bank Limited,"Deutsche Bank AG, Hong Kong Branch",N,Acquisition,0,,23-Apr-2026 10:38,2026-04-23 05:09:03 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+MANAPPURAM,Manappuram Finance Limited,"BC Asia Investments X XV Ltd ,BC Asia Investments X IV Ltd",Y,Acquisition,0,,23-Apr-2026 10:38,2026-04-23 05:09:03 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+YESBANK,Yes Bank Limited,Axis Trustee Services Limited,N,Sale,,1604258815,23-Apr-2026 10:35,2026-04-23 05:06:01 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+CONFIPET,Confidence Petroleum India Limited,Neela Khara,Y,Acquisition,8344164,,22-Apr-2026 11:57,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+YESBANK,Yes Bank Limited,"Deutsche Bank AG, Hong Kong Branch",N,Acquisition,0,,22-Apr-2026 11:56,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+YESBANK,Yes Bank Limited,"DB Trustees (Hong Kong) Limited (DB Trustee) and Deutsche Bank AG, Singapore Branch (DBSG) each acting in their capacity as the offshore security agents for certain lenders, DWS Investment GmbH, DWS International GmbH and DBX Advisors LLC",N,Acquisition,0,,22-Apr-2026 11:56,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+DODLA,Dodla Dairy Limited,HDFC Mutual Fund,N,Acquisition,1206919,,22-Apr-2026 11:55,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+IEX,Indian Energy Exchange Limited,Mirae Asset Mutual Fund,N,Sale,,1696145,22-Apr-2026 11:55,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+ROSSARI,Rossari Biotech Limited,SBI Mutual Fund under its Various Schemes,N,Sale,,157000,22-Apr-2026 11:54,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+GRINFRA,G R Infraprojects Limited,SBI Mutual fund under its Various Schemes,N,Sale,,40821,22-Apr-2026 11:53,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+INDSWFTLAB,Ind-Swift Laboratories Limited,HCP Investments,N,Sale,,6503423,22-Apr-2026 11:53,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+NEOGEN,Neogen Chemicals Limited,CADAMBA SOLUTIONS PRIVATE LIMITED,Y,Acquisition,1000000,,22-Apr-2026 11:52,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+IXIGO,Le Travenues Technology Limited,Schroder Investment Management (Singapore) Ltd,N,Sale,,428620,22-Apr-2026 11:52,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+BHARATWIRE,Bharat Wire Ropes Limited,Lloyds Enterprises Limited,N,Acquisition,1646875,,22-Apr-2026 11:51,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0
+BHARATWIRE,Bharat Wire Ropes Limited,Lloyds Metals and Energy Limited,N,Acquisition,2000000,,22-Apr-2026 11:51,2026-04-22 08:46:53 UTC,2026-04-26 14:47:28 UTC,2026-04-26 14:47:28 UTC,0

@@ -12,13 +12,13 @@ class BreakoutState(rx.State):
     current_page, page_size = 1, 50
     filter_trend, filter_rv, filter_status = "ALL", "ALL", "ALL"
     filter_m_rsi2 = "ALL"
+    filter_profile: str = "ALL"
     filter_min_price, filter_max_price = "0.0", "100000.0"
     filter_brk_stage = "ALL"
     filter_mrs_grid: str = "ALL"
     preset_mode: str = "ALL"
     sort_sidecar_key: str = ""
     sort_sidecar_desc: bool = False
-
     async def on_load(self):
         """Align sidecar universe with main dashboard; refresh engine when opening /breakout."""
         main = await self.get_state(State)
@@ -26,8 +26,7 @@ class BreakoutState(rx.State):
         async with self:
             self.universe = u
         brk = get_breakout_scanner(universe=u)
-        if getattr(brk, "universe", None) != u:
-            brk.update_universe(u)
+        brk.update_universe(u, None)
         return BreakoutState.poll_sidecar
     @rx.var
     def result_count(self) -> int: return self.total_count
@@ -39,7 +38,7 @@ class BreakoutState(rx.State):
     def paginated_results(self) -> list[dict]: return self.results
     @rx.var
     def mrs_sort_arrow(self) -> str:
-        if self.sort_sidecar_key != "mrs":
+        if self.sort_sidecar_key != "e9t_count":
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
     @rx.var
@@ -49,13 +48,25 @@ class BreakoutState(rx.State):
         return "▼" if self.sort_sidecar_desc else "▲"
     @rx.var
     def mrsi2_sort_arrow(self) -> str:
-        if self.sort_sidecar_key != "mrsi2":
+        if self.sort_sidecar_key != "e21c_count":
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
     @rx.var
     def ltp_sort_arrow(self) -> str:
         if self.sort_sidecar_key != "ltp":
+            return ""
+        return "▼" if self.sort_sidecar_desc else "▲"
+
+    @rx.var
+    def rvol_sort_arrow(self) -> str:
+        if self.sort_sidecar_key != "rv":
+            return ""
+        return "▼" if self.sort_sidecar_desc else "▲"
+
+    @rx.var
+    def wmrs_sort_arrow(self) -> str:
+        if self.sort_sidecar_key not in ("wmrs", "mrs"):
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
@@ -67,19 +78,19 @@ class BreakoutState(rx.State):
 
     @rx.var
     def brk_sort_arrow(self) -> str:
-        if self.sort_sidecar_key != "brk":
+        if self.sort_sidecar_key != "last_tag":
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
     @rx.var
     def tf_sort_arrow(self) -> str:
-        if self.sort_sidecar_key != "tf":
+        if self.sort_sidecar_key != "b_count":
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
     @rx.var
     def stage_sort_arrow(self) -> str:
-        if self.sort_sidecar_key != "status":
+        if self.sort_sidecar_key != "state_name":
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
@@ -95,6 +106,12 @@ class BreakoutState(rx.State):
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
+    @rx.var
+    def rs_rating_sort_arrow(self) -> str:
+        if self.sort_sidecar_key != "rs_rating":
+            return ""
+        return "▼" if self.sort_sidecar_desc else "▲"
+
     def next_page(self): self.current_page = min(self.total_pages, self.current_page + 1)
     def prev_page(self): self.current_page = max(1, self.current_page - 1)
     def set_universe(self, u):
@@ -102,8 +119,13 @@ class BreakoutState(rx.State):
         self.sort_sidecar_key, self.sort_sidecar_desc = "", False
         self.filter_m_rsi2 = "ALL"
         self.filter_mrs_grid = "ALL"
-        get_breakout_scanner(universe=u).update_universe(u)
+        # A lingering symbol filter from the previous universe (e.g. NHPC when jumping from
+        # Nifty 500 → Nifty 50) would leave the grid looking empty and "stuck" — clear it.
+        self.search_query = ""
+        get_breakout_scanner(universe=u).update_universe(u, None)
     def set_search_query(self, q: str): self.search_query, self.current_page = (q or ""), 1
+    def set_filter_profile(self, v: str):
+        self.filter_profile, self.current_page = (v or "ALL").strip().upper(), 1
     def set_filter_brk_stage(self, v: str):
         self.filter_brk_stage, self.current_page = (v or "ALL"), 1
 
@@ -169,32 +191,40 @@ class BreakoutState(rx.State):
             self.sort_sidecar_desc = key not in ("symbol", "trend_text", "udai", "status", "mrsi2")
         self.current_page = 1
     def toggle_sort_mrs(self):
-        self.toggle_sort("mrs")
+        self.toggle_sort("e9t_count")
     def toggle_sort_udai(self):
         self.toggle_sort("udai")
     def toggle_sort_mrsi2(self):
-        self.toggle_sort("mrsi2")
+        self.toggle_sort("e21c_count")
 
     def toggle_sort_ltp(self):
         self.toggle_sort("ltp")
+
+    def toggle_sort_rvol(self):
+        self.toggle_sort("rv")
+
+    def toggle_sort_wmrs(self):
+        self.toggle_sort("wmrs")
 
     def toggle_sort_chp(self):
         self.toggle_sort("chp")
 
     def toggle_sort_brk(self):
-        self.toggle_sort("brk")
+        self.toggle_sort("last_tag")
 
     def toggle_sort_tf(self):
-        self.toggle_sort("tf")
+        self.toggle_sort("b_count")
 
     def toggle_sort_stage(self):
-        self.toggle_sort("status")
+        self.toggle_sort("state_name")
 
     def toggle_sort_symbol(self):
         self.toggle_sort("symbol")
 
     def toggle_sort_mrs_grid(self):
         self.toggle_sort("mrs_grid")
+    def toggle_sort_rs_rating(self):
+        self.toggle_sort("rs_rating")
 
     def update_engine_config(self, f): update_engine_config_handler(self, f)
     def download_excel(self): return download_excel_handler(self)

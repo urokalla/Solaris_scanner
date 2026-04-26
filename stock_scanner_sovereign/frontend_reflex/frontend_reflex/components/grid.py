@@ -43,9 +43,9 @@ _COL = {
     "rvol": _col_style("6%"),
     "wrsi2": _col_style("6%"),
     "ad": _col_style("5%"),
-    "brk": _col_style("5%"),
     "prf": _col_style("5%"),
-    "status": _col_style("15%"),
+    "cross_age": _col_style("8%"),
+    "status": _col_style("12%"),
 }
 
 
@@ -94,14 +94,15 @@ def data_grid():
                     width="80px",
                 ),
                 rx.select(
-                    ["ALL", "Below0↑"],
-                    value=State.filter_mrs_rcvr_select_value,
-                    on_change=State.set_filter_mrs_rcvr,
+                    ["ALL", "HAS", "LE7", "LE30", "LE90", "UNK"],
+                    value=State.filter_cross_age,
+                    on_change=State.set_filter_cross_age,
                     color="white",
                     bg="#111111",
                     border="1px solid #333",
                     size="1",
-                    width="88px",
+                    width="92px",
+                    title="RS_0_CROSS_AGE: HAS=known age | LE7/30/90=max calendar days | UNK=— only",
                 ),
                 rx.text("SORT", font_size="10px", color="#888888", align_self="center"),
                 rx.select(
@@ -119,7 +120,7 @@ def data_grid():
                         "Ticker",
                         "Status",
                         "Profile",
-                        "BRK",
+                        "RS_0_CROSS_AGE",
                     ],
                     value=State.grid_sort_field_select_label,
                     on_change=State.set_grid_sort_field,
@@ -322,18 +323,6 @@ def data_grid():
                     ),
                     rx.table.column_header_cell(
                         rx.hstack(
-                            rx.text("BRK", color="white"),
-                            rx.text(State.grid_sort_arrow_brk, color="#FFB000", font_size="9px"),
-                            spacing="1",
-                            align_items="center",
-                            cursor="pointer",
-                            on_click=lambda: State.toggle_grid_sort("brk_lvl"),
-                        ),
-                        **_TH,
-                        **_COL["brk"],
-                    ),
-                    rx.table.column_header_cell(
-                        rx.hstack(
                             rx.text("PRF", color="white"),
                             rx.text(State.grid_sort_arrow_profile, color="#FFB000", font_size="9px"),
                             spacing="1",
@@ -343,6 +332,18 @@ def data_grid():
                         ),
                         **_TH,
                         **_COL["prf"],
+                    ),
+                    rx.table.column_header_cell(
+                        rx.hstack(
+                            rx.text("RS_0_CROSS_AGE", color="white"),
+                            rx.text(State.grid_sort_arrow_cross_age, color="#FFB000", font_size="9px"),
+                            spacing="1",
+                            align_items="center",
+                            cursor="pointer",
+                            on_click=lambda: State.toggle_grid_sort("zero_cross_age_days"),
+                        ),
+                        **_TH,
+                        **_COL["cross_age"],
                     ),
                     rx.table.column_header_cell(
                         rx.hstack(
@@ -405,8 +406,6 @@ def data_grid():
                                         r["rv"],
                                         r["profile"],
                                         r["status"],
-                                        r["brk_lvl_str"],
-                                        r["mrs_rcvr_str"],
                                         r["w_rsi2_str"],
                                     ),
                                 ),
@@ -517,12 +516,6 @@ def data_grid():
                             **_COL["ad"],
                         ),
                         rx.table.cell(
-                            rx.text(r["brk_lvl_str"], title=r["brk_lvl_str"]),
-                            color="#D1D1D1",
-                            **_TD,
-                            **_COL["brk"],
-                        ),
-                        rx.table.cell(
                             rx.text(r["profile"], title=r["profile"]),
                             color="#666666",
                             **_TD,
@@ -530,17 +523,36 @@ def data_grid():
                         ),
                         rx.table.cell(
                             rx.text(
-                                r["status"],
-                                title=r["status"],
-                                color=rx.cond(
-                                    r["status"] == "BUY NOW",
-                                    "#00FF00",
-                                    rx.cond(
-                                        r["status"] == "TRENDING",
-                                        "#88FFAA",
-                                        rx.cond(r["status"] == "NOT TRENDING", "#FF6666", "#D1D1D1"),
+                                r["zero_cross_age"],
+                                color="#888888",
+                                title="Age since weekly mRS crossed above 0",
+                            ),
+                            **_TD,
+                            **_COL["cross_age"],
+                        ),
+                        rx.table.cell(
+                            rx.hstack(
+                                rx.text(
+                                    r["status"],
+                                    title=r["status"],
+                                    color=rx.cond(
+                                        r["status"] == "BUY NOW",
+                                        "#00FF00",
+                                        rx.cond(
+                                            r["status"] == "TRENDING",
+                                            "#88FFAA",
+                                            rx.cond(r["status"] == "NOT TRENDING", "#FF6666", "#D1D1D1"),
+                                        ),
                                     ),
                                 ),
+                                rx.text(
+                                    rx.cond(r["zero_cross_age"] == "—", "", r["zero_cross_age"]),
+                                    color="#888888",
+                                    font_size="10px",
+                                    title="Age since last mRS crossed above 0",
+                                ),
+                                spacing="1",
+                                align_items="center",
                             ),
                             **_TD,
                             **_COL["status"],
