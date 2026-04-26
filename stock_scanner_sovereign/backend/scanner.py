@@ -10,7 +10,11 @@ from backend.scanner_shm import SHMBridge
 from backend.scanner_math import RSMathEngine
 from utils.scanner_analysis import compute_trading_profile, profile_label_to_shm
 from utils.constants import BENCHMARK_MAP
-from utils.mrs_weekly_dynamics import weekly_mrs_trailing_series, weeks_since_last_mrs_zero_cross_up
+from utils.mrs_weekly_dynamics import (
+    weekly_mrs_trailing_series,
+    weeks_since_last_mrs_zero_cross_up,
+    weeks_below_zero_before_last_cross_up,
+)
 from psycopg2.extras import execute_values
 
 # Environment-Agnostic Logging (Relative to script location)
@@ -163,6 +167,7 @@ class MasterScanner:
             self.db.ensure_live_state_brk_column()
             self.db.ensure_mrs_prev_day_column()
             self.db.ensure_live_state_mrs_0_cross_unix_column()
+            self.db.ensure_live_state_mrs_0_cross_from_neg_days_column()
             self.db.ensure_rs_prev_day_column()
             self.db.ensure_w_rsi2_column()
         except Exception as e:
@@ -238,6 +243,8 @@ class MasterScanner:
         self._buy_session_latch: set[str] = set()
         # Last time weekly mRS crossed above 0 (master runtime + live_state.mrs_0_cross_unix for dashboard).
         self._mrs_zero_cross_up_ts: dict[str, float] = {}
+        # Runtime tracker: start timestamp for current below-zero spell (for time-to-cross metric).
+        self._mrs_below_zero_start_ts: dict[str, float] = {}
         self._last_ist_trading_date = None
         self._mrs_prev_day_cache: dict[str, float] = {}
         self._mrs_prev_day_cache_ts: float = 0.0
@@ -934,12 +941,12 @@ class MasterScanner:
         finally:
             self._w_rsi2_ts = time.time()
 
-    def _persist_mrs_0_cross_unix(self, sym: str, ts: float) -> None:
+    def _persist_mrs_0_cross_unix(self, sym: str, ts: float, from_neg_days: float | None = None) -> None:
         """Dashboard runs SHM_SLAVE — only the master scanner should write cross timestamps to Postgres."""
         if not getattr(self.shm, "is_master", False):
             return
         try:
-            self.db.upsert_mrs_0_cross_unix(sym, ts)
+            self.db.upsert_mrs_0_cross_unix(sym, ts, from_neg_days=from_neg_days)
         except Exception as ex:
             logger.warning("mrs_0_cross_unix persist failed for %s: %s", sym, ex)
 
@@ -961,16 +968,19 @@ class MasterScanner:
             K = max(3, min(52, H - 1))
             Y = weekly_mrs_trailing_series(pm, br, K)
             wk = weeks_since_last_mrs_zero_cross_up(Y)
+            wb = weeks_below_zero_before_last_cross_up(Y)
             now_t = time.time()
-            n = min(int(pm.shape[0]), len(self.symbols), int(wk.shape[0]))
-            rows: list[tuple[str, float]] = []
+            n = min(int(pm.shape[0]), len(self.symbols), int(wk.shape[0]), int(wb.shape[0]))
+            rows: list[tuple[str, float, float]] = []
             for i in range(n):
                 w = int(wk[i])
                 if w < 0:
                     continue
-                rows.append((self.symbols[i], now_t - float(w) * 7.0 * 86400.0))
+                b = int(wb[i])
+                from_neg_days = float(max(0, b) * 7) if b >= 0 else float(max(0, w) * 7)
+                rows.append((self.symbols[i], now_t - float(w) * 7.0 * 86400.0, from_neg_days))
             if rows:
-                self.db.upsert_mrs_0_cross_unix_fill_if_null_batch(rows)
+                self.db.upsert_mrs_0_cross_days_fill_if_null_batch(rows)
         except Exception as ex:
             logger.warning("batch mrs_0_cross_unix fill from history failed: %s", ex, exc_info=True)
 
@@ -989,13 +999,16 @@ class MasterScanner:
             return b"NOT TRENDING"
         if n <= 0:
             self._buy_session_latch.discard(sym)
+            self._mrs_below_zero_start_ts.setdefault(sym, time.time())
             return b"NOT TRENDING"
         if sym in self._buy_session_latch:
             return b"BUY NOW"
         if p <= 0:
             _ts = time.time()
             self._mrs_zero_cross_up_ts[sym] = _ts
-            self._persist_mrs_0_cross_unix(sym, _ts)
+            start_ts = float(self._mrs_below_zero_start_ts.pop(sym, _ts) or _ts)
+            from_neg_days = max(0.0, (_ts - start_ts) / 86400.0)
+            self._persist_mrs_0_cross_unix(sym, _ts, from_neg_days=from_neg_days)
             self._buy_session_latch.add(sym)
             return b"BUY NOW"
         if mrs_prev_day is not None and mrs_prev_day > 0:
@@ -1003,7 +1016,9 @@ class MasterScanner:
         if mrs_prev_day is not None and mrs_prev_day <= 0:
             _ts = time.time()
             self._mrs_zero_cross_up_ts[sym] = _ts
-            self._persist_mrs_0_cross_unix(sym, _ts)
+            start_ts = float(self._mrs_below_zero_start_ts.pop(sym, _ts) or _ts)
+            from_neg_days = max(0.0, (_ts - start_ts) / 86400.0)
+            self._persist_mrs_0_cross_unix(sym, _ts, from_neg_days=from_neg_days)
             self._buy_session_latch.add(sym)
             return b"BUY NOW"
         return b"TRENDING"
@@ -1394,6 +1409,10 @@ class MasterScanner:
             if zm is None:
                 zm = self.db.get_mrs_0_cross_unix_map(syms) if syms else {}
                 _ui_cache_set("mrs0cross", zm)
+            zdm = _ui_cache_get("mrs0crossdays")
+            if zdm is None:
+                zdm = self.db.get_mrs_0_cross_from_neg_days_map(syms) if syms else {}
+                _ui_cache_set("mrs0crossdays", zdm)
 
             for d in data:
                 sym = str(d.get("symbol", ""))
@@ -1403,9 +1422,19 @@ class MasterScanner:
                 if ts <= 0:
                     d["zero_cross_age"] = "—"
                     d["zero_cross_age_days"] = None
+                    d["zero_cross_from_neg_days"] = None
+                    d["zero_cross_from_neg_str"] = "—"
                 else:
                     days_f = max(0.0, (now_ts - ts) / 86400.0)
                     d["zero_cross_age_days"] = float(days_f)
+                    fd = zdm.get(sym)
+                    if fd is not None:
+                        fdv = max(0.0, float(fd))
+                        d["zero_cross_from_neg_days"] = fdv
+                        d["zero_cross_from_neg_str"] = f"{int(round(fdv))}d"
+                    else:
+                        d["zero_cross_from_neg_days"] = None
+                        d["zero_cross_from_neg_str"] = "—"
                     days = int(days_f)
                     if days <= 0:
                         d["zero_cross_age"] = "0d"

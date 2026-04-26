@@ -32,9 +32,9 @@ def _col_style(width: str, ellipsis: bool = True) -> dict:
 
 # Fixed widths for every column (table-layout:fixed). Percentages sum to 100% so no stray “air” in one column.
 _COL = {
-    "ticker": _col_style("18%"),
-    "price": _col_style("7%"),
-    "chg": _col_style("5%"),
+    "ticker": _col_style("16%"),
+    "price": _col_style("6%"),
+    "chg": _col_style("4%"),
     "rt": _col_style("5%"),
     "rtd": _col_style("5%"),
     "wmrs": _col_style("6%"),
@@ -43,9 +43,10 @@ _COL = {
     "rvol": _col_style("6%"),
     "wrsi2": _col_style("6%"),
     "ad": _col_style("5%"),
-    "prf": _col_style("5%"),
-    "cross_age": _col_style("8%"),
-    "status": _col_style("12%"),
+    "prf": _col_style("4%"),
+    "cross_age": _col_style("7%"),
+    "cross_from_neg": _col_style("8%"),
+    "status": _col_style("10%"),
 }
 
 
@@ -346,6 +347,11 @@ def data_grid():
                         **_COL["cross_age"],
                     ),
                     rx.table.column_header_cell(
+                        rx.text("FROM<0_DAYS", color="white"),
+                        **_TH,
+                        **_COL["cross_from_neg"],
+                    ),
+                    rx.table.column_header_cell(
                         rx.hstack(
                             rx.text("STATUS", color="white"),
                             rx.text(State.grid_sort_arrow_status, color="#FFB000", font_size="9px"),
@@ -529,6 +535,15 @@ def data_grid():
                             ),
                             **_TD,
                             **_COL["cross_age"],
+                        ),
+                        rx.table.cell(
+                            rx.text(
+                                r["zero_cross_from_neg_str"],
+                                color="#888888",
+                                title="Days spent below 0 before the latest cross-up",
+                            ),
+                            **_TD,
+                            **_COL["cross_from_neg"],
                         ),
                         rx.table.cell(
                             rx.hstack(

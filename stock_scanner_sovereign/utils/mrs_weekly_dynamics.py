@@ -79,6 +79,39 @@ def weeks_since_last_mrs_zero_cross_up(trailing_weekly_mrs: np.ndarray) -> np.nd
     return out
 
 
+def weeks_below_zero_before_last_cross_up(trailing_weekly_mrs: np.ndarray) -> np.ndarray:
+    """
+    For each symbol, estimate the length (in weekly bars) of the most recent below-zero run
+    immediately before the latest cross-up through 0.
+
+    Returns int32 ``>= 1`` when a concrete cross segment exists in the visible trailing window.
+    Returns ``-1`` when no qualifying segment is visible (e.g. no cross, always > 0, or live <= 0).
+    """
+    y = np.asarray(trailing_weekly_mrs, dtype=np.float64)
+    if y.ndim != 2 or y.shape[1] < 2:
+        return np.full(0, -1, dtype=np.int32)
+    n, k = y.shape
+    out = np.full(n, -1, dtype=np.int32)
+    for i in range(n):
+        row = y[i]
+        if not np.isfinite(row[-1]) or float(row[-1]) <= 0:
+            continue
+        last_t = -1
+        for t in range(1, k):
+            if float(row[t - 1]) <= 0.0 and float(row[t]) > 0.0:
+                last_t = t
+        if last_t <= 0:
+            continue
+        run = 0
+        j = last_t - 1
+        while j >= 0 and float(row[j]) <= 0.0:
+            run += 1
+            j -= 1
+        if run > 0:
+            out[i] = int(run)
+    return out
+
+
 def weekly_mrs_trailing_series(
     price_matrix_w: np.ndarray,
     bench_prices_w: np.ndarray,

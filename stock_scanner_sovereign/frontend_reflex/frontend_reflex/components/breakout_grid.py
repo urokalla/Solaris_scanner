@@ -86,12 +86,34 @@ def breakout_data_grid():
         rx.table.column_header_cell(rx.hstack(rx.text("SYMBOL", color="white"), rx.text(BreakoutState.symbol_sort_arrow, color="#FFB000", font_size="10px"), spacing="1", align_items="center", cursor="pointer", on_click=BreakoutState.toggle_sort_symbol), color="white"),
         rx.table.column_header_cell(
             rx.hstack(
+                rx.text("SCORE", color="white"),
+                rx.text(BreakoutState.setup_score_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_setup_score,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
                 rx.text("PRICE", color="white"),
                 rx.text(BreakoutState.ltp_sort_arrow, color="#FFB000", font_size="10px"),
                 spacing="1",
                 align_items="center",
                 cursor="pointer",
                 on_click=BreakoutState.toggle_sort_ltp,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("CHG%", color="white"),
+                rx.text(BreakoutState.chp_sort_arrow, color="#FFB000", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutState.toggle_sort_chp,
             ),
             color="white",
         ),
@@ -151,10 +173,26 @@ def breakout_data_grid():
             ),
             color="white",
         ),
+        rx.table.column_header_cell(
+            rx.vstack(
+                rx.text("% FROM B (D)", color="white", font_size="11px"),
+                rx.text("close → LTP", color="#888888", font_size="9px"),
+                spacing="0",
+                align_items="start",
+            ),
+        ),
         rx.table.column_header_cell(rx.text("LAST TAG W", color="white")),
         rx.table.column_header_cell(
+            rx.vstack(
+                rx.text("% FROM B (W)", color="white", font_size="11px"),
+                rx.text("close → LTP", color="#888888", font_size="9px"),
+                spacing="0",
+                align_items="start",
+            ),
+        ),
+        rx.table.column_header_cell(
             rx.hstack(
-                rx.text("B#", color="white"),
+                rx.text("B# D/W", color="white"),
                 rx.text(BreakoutState.tf_sort_arrow, color="#FFB000", font_size="10px"),
                 spacing="1",
                 align_items="center",
@@ -165,7 +203,7 @@ def breakout_data_grid():
         ),
         rx.table.column_header_cell(
             rx.hstack(
-                rx.text("E9CT#", color="white"),
+                rx.text("E9CT# D/W", color="white"),
                 rx.text(BreakoutState.mrs_sort_arrow, color="#FFB000", font_size="10px"),
                 spacing="1",
                 align_items="center",
@@ -176,7 +214,7 @@ def breakout_data_grid():
         ),
         rx.table.column_header_cell(
             rx.hstack(
-                rx.text("E21C#", color="white"),
+                rx.text("E21C# D/W", color="white"),
                 rx.text(BreakoutState.mrsi2_sort_arrow, color="#FFB000", font_size="10px"),
                 spacing="1",
                 align_items="center",
@@ -187,7 +225,7 @@ def breakout_data_grid():
         ),
         rx.table.column_header_cell(
             rx.hstack(
-                rx.text("RST CNT", color="white"),
+                rx.text("RST D/W", color="white"),
                 rx.text(BreakoutState.stage_sort_arrow, color="#FFB000", font_size="10px"),
                 spacing="1",
                 align_items="center",
@@ -196,7 +234,7 @@ def breakout_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("AGE", color="white")),
+        rx.table.column_header_cell(rx.text("AGE D/W", color="white")),
     )
     body = rx.table.body(
         rx.foreach(
@@ -216,7 +254,21 @@ def breakout_data_grid():
                     ),
                     padding_y="0",
                 ),
+                rx.table.cell(
+                    rx.text(
+                        r.get("setup_score_ui", "—"),
+                        color=r.get("setup_score_color", "#D1D1D1"),
+                        font_weight="bold",
+                    ),
+                    font_size="12px",
+                    padding_y="0",
+                ),
                 rx.table.cell(r["ltp"], color=r["chp_color"], font_size="12px", padding_y="0"),
+                rx.table.cell(
+                    rx.text(r.get("chp", "—"), color=r.get("chp_color", "#D1D1D1")),
+                    font_size="11px",
+                    padding_y="0",
+                ),
                 rx.table.cell(
                     rx.text(r.get("rs_rating", "—"), color=r.get("rs_rating_color", "#D1D1D1"), font_weight="bold"),
                     font_size="12px",
@@ -238,8 +290,17 @@ def breakout_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.text(r.get("state_name", "LOCKED"), color="#D1D1D1"),
-                    font_size="12px",
+                    rx.vstack(
+                        rx.text(r.get("state_name", "LOCKED"), color="#D1D1D1", font_size="12px"),
+                        rx.text(
+                            r.get("post_rst_hint_d", ""),
+                            color="#FFB000",
+                            font_size="9px",
+                            font_weight="bold",
+                        ),
+                        spacing="0",
+                        align_items="start",
+                    ),
                     padding_y="0",
                 ),
                 rx.table.cell(
@@ -251,11 +312,57 @@ def breakout_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.text(
-                        r.get("last_tag_w", "—"),
-                        color=r.get("last_tag_color_w", "#888888"),
+                    rx.vstack(
+                        rx.text(
+                            r.get("brk_move_pct", "—"),
+                            color=r.get("brk_move_color", "#D1D1D1"),
+                            font_weight="bold",
+                            font_size="11px",
+                        ),
+                        rx.text(
+                            r.get("brk_b_anchor_dt", "—"),
+                            color="#888888",
+                            font_size="9px",
+                        ),
+                        spacing="0",
+                        align_items="start",
                     ),
-                    font_size="11px",
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.vstack(
+                        rx.text(
+                            r.get("last_tag_w", "—"),
+                            color=r.get("last_tag_color_w", "#888888"),
+                            font_size="11px",
+                        ),
+                        rx.text(
+                            r.get("post_rst_hint_w", ""),
+                            color="#FFB000",
+                            font_size="9px",
+                            font_weight="bold",
+                        ),
+                        spacing="0",
+                        align_items="start",
+                    ),
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.vstack(
+                        rx.text(
+                            r.get("brk_move_pct_w", "—"),
+                            color=r.get("brk_move_color_w", "#D1D1D1"),
+                            font_weight="bold",
+                            font_size="11px",
+                        ),
+                        rx.text(
+                            r.get("brk_b_anchor_dt_w", "—"),
+                            color="#888888",
+                            font_size="9px",
+                        ),
+                        spacing="0",
+                        align_items="start",
+                    ),
                     padding_y="0",
                 ),
                 rx.table.cell(rx.text(f"{r.get('b_count', 0)}/{r.get('b_count_w', 0)}"), font_size="11px", padding_y="0"),

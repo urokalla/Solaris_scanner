@@ -306,6 +306,7 @@ class State(rx.State):
             "status": "Status",
             "profile": "Profile",
             "ad_grade": "A/D",
+            "zero_cross_age_days": "RS_0_CROSS_AGE",
         }
         return rev.get(self.grid_sort_key, "RS")
 
@@ -350,14 +351,14 @@ class State(rx.State):
         async with self:
             u = self.universe
         await self._sync_breakout_sidecars(u)
-        return rx.redirect("/breakout")
+        return rx.redirect("/breakout", is_external=True)
 
     async def open_breakout_timing_full_universe(self):
         """Open breakout clock with the full Nifty list for the current main universe (no profile subset)."""
         async with self:
             u = self.universe
         await self._sync_breakout_sidecars(u)
-        return rx.redirect("/breakout-timing")
+        return rx.redirect("/breakout-timing", is_external=True)
 
     def open_tradingview(self, symbol: str):
         """Open TradingView chart (NSE) in a new tab."""
@@ -388,8 +389,8 @@ class State(rx.State):
         """
         s = str(symbol or "").strip().upper()
         if not s:
-            return rx.redirect("/events")
-        return rx.redirect(f"/events?symbol={quote(s, safe=':-_')}")
+            return rx.redirect("/events", is_external=True)
+        return rx.redirect(f"/events?symbol={quote(s, safe=':-_')}", is_external=True)
 
     def scanner_snapshot_alert(
         self,

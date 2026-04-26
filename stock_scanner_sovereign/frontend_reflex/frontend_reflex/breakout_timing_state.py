@@ -46,6 +46,12 @@ class BreakoutTimingState(rx.State):
             return ""
         return "▼" if self.sort_timing_desc else "▲"
 
+    @rx.var
+    def setup_score_sort_arrow(self) -> str:
+        if self.sort_timing_key != "setup_score":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
     async def on_load(self):
         main = await self.get_state(State)
         u = main.universe
@@ -102,6 +108,14 @@ class BreakoutTimingState(rx.State):
             self.sort_timing_desc = not self.sort_timing_desc
         else:
             self.sort_timing_key = "rs_rating"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_setup_score(self):
+        if self.sort_timing_key == "setup_score":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "setup_score"
             self.sort_timing_desc = True
         self.current_page = 1
 

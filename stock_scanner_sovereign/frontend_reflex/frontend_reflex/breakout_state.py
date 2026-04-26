@@ -112,6 +112,12 @@ class BreakoutState(rx.State):
             return ""
         return "▼" if self.sort_sidecar_desc else "▲"
 
+    @rx.var
+    def setup_score_sort_arrow(self) -> str:
+        if self.sort_sidecar_key != "setup_score":
+            return ""
+        return "▼" if self.sort_sidecar_desc else "▲"
+
     def next_page(self): self.current_page = min(self.total_pages, self.current_page + 1)
     def prev_page(self): self.current_page = max(1, self.current_page - 1)
     def set_universe(self, u):
@@ -147,7 +153,7 @@ class BreakoutState(rx.State):
             self.sort_sidecar_desc = False
             return
         if mode == "BREAKOUT":
-            self.sort_sidecar_key = "chp"
+            self.sort_sidecar_key = "setup_score"
             self.sort_sidecar_desc = True
             return
         if mode == "STAGE 2":
@@ -225,6 +231,9 @@ class BreakoutState(rx.State):
         self.toggle_sort("mrs_grid")
     def toggle_sort_rs_rating(self):
         self.toggle_sort("rs_rating")
+
+    def toggle_sort_setup_score(self):
+        self.toggle_sort("setup_score")
 
     def update_engine_config(self, f): update_engine_config_handler(self, f)
     def download_excel(self): return download_excel_handler(self)

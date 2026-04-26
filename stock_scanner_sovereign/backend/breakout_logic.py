@@ -480,6 +480,8 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
     if not str(r.get("cycle_last_bar_key") or ""):
         st_state = 0; st_below21 = 0; st_b = 0; st_e9t = 0; st_e21c = 0; st_rst = 0; st_last_tag = "—"; st_last_ts = 0.0
         st_last_don_c: float | None = None
+        st_b_anchor_close = 0.0
+        st_b_anchor_ts = 0.0
         try:
             dlen = max(2, int(don_len))
             replay_end = i
@@ -502,6 +504,8 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
                     st_rst += 1
                     st_state = 0; st_b = 0; st_e9t = 0; st_e21c = 0
                     st_last_tag = "RST"; st_last_ts = float(hv[j][0])
+                    st_b_anchor_close = 0.0
+                    st_b_anchor_ts = 0.0
                 elif brk:
                     st_state = 1
                     st_b += 1
@@ -510,6 +514,8 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
                         # Pine "Power Bar": breakout and EMA9 test same candle.
                         st_last_tag = _tag_power_e9ct(st_last_tag)
                     st_last_ts = float(hv[j][0])
+                    st_b_anchor_close = c
+                    st_b_anchor_ts = float(hv[j][0])
                 elif st_state > 0:
                     # Pine's layout: first an if/elif for state==1 transitions, then a SEPARATE
                     # if for state==2 reclaim (so a bar that flipped 1→2 this bar can't also
@@ -546,11 +552,22 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
         r["last_tag"] = st_last_tag
         r["last_event_ts"] = st_last_ts
         r["cycle_last_bar_key"] = bar_key
+        r["brk_b_anchor_close"] = float(st_b_anchor_close) if st_b_anchor_close > 0 else 0.0
+        r["brk_b_anchor_ts"] = float(st_b_anchor_ts) if st_b_anchor_close > 0 else 0.0
         if st_last_don_c is not None:
             r["brk_lvl"] = st_last_don_c
         return
 
     if str(r.get("cycle_last_bar_key") or "") == bar_key:
+        _anc0 = float(r.get("brk_b_anchor_close", 0.0) or 0.0)
+        _lt0 = str(r.get("last_tag") or "")
+        if (
+            _anc0 <= 0.0
+            and int(r.get("b_count", 0) or 0) > 0
+            and _lt0.startswith("B")
+        ):
+            r["cycle_last_bar_key"] = ""
+            _update_minimal_cycle_state(r, hv, don_len=don_len)
         return
     r["cycle_last_bar_key"] = bar_key
 
@@ -578,6 +595,8 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
     if state > 0 and below21 >= 2:
         rst_count += 1
         state = 0; b_count = 0; e9t_count = 0; e21c_count = 0; last_tag = "RST"
+        r["brk_b_anchor_close"] = 0.0
+        r["brk_b_anchor_ts"] = 0.0
     elif breakout:
         state = 1
         b_count += 1
@@ -585,6 +604,8 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
         if low <= e9_ser[i]:
             # Pine "Power Bar": breakout and EMA9 test same candle.
             last_tag = _tag_power_e9ct(last_tag)
+        r["brk_b_anchor_close"] = close
+        r["brk_b_anchor_ts"] = ts
     elif state > 0:
         # Pine's layout: state==1 transitions via if/elif, then a separate
         # if for state==2 reclaim so a 1→2 transition this bar cannot also reclaim.
@@ -704,6 +725,8 @@ def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: 
         "last_event_ts": r.get("last_event_ts_w", 0.0),
         "cycle_last_bar_key": r.get("cycle_last_bar_key_w", ""),
         "brk_lvl": r.get("brk_lvl_w"),
+        "brk_b_anchor_close": float(r.get("brk_b_anchor_close_w", 0.0) or 0.0),
+        "brk_b_anchor_ts": float(r.get("brk_b_anchor_ts_w", 0.0) or 0.0),
     }
     _update_minimal_cycle_state(tmp, w, don_len=don_len)
     cstate = int(tmp.get("cycle_state", 0) or 0)
@@ -719,6 +742,8 @@ def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: 
     r["cycle_last_bar_key_w"] = str(tmp.get("cycle_last_bar_key", "") or "")
     if tmp.get("brk_lvl") is not None:
         r["brk_lvl_w"] = tmp.get("brk_lvl")
+    r["brk_b_anchor_close_w"] = float(tmp.get("brk_b_anchor_close", 0) or 0)
+    r["brk_b_anchor_ts_w"] = float(tmp.get("brk_b_anchor_ts", 0) or 0)
 
 
 def initial_sync_helper(self):
@@ -1634,6 +1659,75 @@ def _fmt_last_event_ist(ts_raw) -> str:
         return "—"
 
 
+def compute_breakout_setup_score_row(d: dict) -> int:
+    """
+    0–100 heuristic rank for /breakout sorting (tape + cycle context).
+    Not investment advice.
+    """
+    try:
+        chp = float(d.get("change_pct", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        chp = 0.0
+    try:
+        rv = float(d.get("rv", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        rv = 0.0
+    try:
+        mrs = float(d.get("mrs", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        mrs = 0.0
+    try:
+        ltp = float(d.get("ltp", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        ltp = 0.0
+    try:
+        rsr_raw = d.get("rs_rating")
+        rsr = int(rsr_raw) if rsr_raw is not None else None
+    except (TypeError, ValueError):
+        rsr = None
+
+    pts = 0.0
+    if rsr is not None and rsr > 0:
+        pts += min(28.0, rsr * 0.28)
+    else:
+        pts += 10.0
+
+    pts += min(22.0, max(0.0, rv) * 8.0)
+    pts += max(0.0, min(18.0, 8.0 + mrs * 2.5))
+
+    if chp >= 0:
+        pts += min(10.0, 2.0 + chp * 0.35)
+    else:
+        pts += max(-8.0, chp * 0.45)
+
+    ba = float(d.get("brk_b_anchor_close", 0.0) or 0.0)
+    if ba > 0 and ltp > 0:
+        pbd = ((ltp / ba) - 1.0) * 100.0
+        if pbd >= 0:
+            pts += min(12.0, pbd * 0.95)
+        else:
+            pts += max(-10.0, pbd * 0.85)
+
+    baw = float(d.get("brk_b_anchor_close_w", 0.0) or 0.0)
+    if baw > 0 and ltp > 0:
+        pbw = ((ltp / baw) - 1.0) * 100.0
+        if pbw >= 0:
+            pts += min(7.0, pbw * 0.65)
+        else:
+            pts += max(-6.0, pbw * 0.45)
+
+    if bool(d.get("dual_tf_ema_stack_ok")):
+        pts += 8.0
+    if bool(d.get("is_breakout", False)):
+        pts += 5.0
+
+    lt = str(d.get("last_tag") or "").upper()
+    if lt.startswith("B"):
+        pts += 4.0
+
+    return int(round(max(0.0, min(100.0, pts))))
+
+
 def format_ui_row(d):
     s = d.get('symbol', '')
     try:
@@ -1724,6 +1818,46 @@ def format_ui_row(d):
         w_pending = True
     timing_state_d = _timing_state_from_tag(_ttd, d_pending)
     timing_state_w = _timing_state_from_tag(_ttw, w_pending)
+    # % move since last structural B bar (close on that bar → current LTP). Cleared on RST.
+    brk_move_pct = None
+    brk_move_ui = "—"
+    brk_move_band = "—"
+    brk_move_color = "#888888"
+    _b_anchor = float(d.get("brk_b_anchor_close", 0.0) or 0.0)
+    _b_anchor_ts = float(d.get("brk_b_anchor_ts", 0.0) or 0.0)
+    brk_b_anchor_dt = _fmt_last_event_ist(_b_anchor_ts) if _b_anchor_ts > 0 else "—"
+    try:
+        if _b_anchor > 0 and _ltp_num > 0:
+            brk_move_pct = ((_ltp_num / _b_anchor) - 1.0) * 100.0
+            brk_move_ui = f"{brk_move_pct:+.2f}%"
+            brk_move_band = "B bar close"
+            if brk_move_pct > 0:
+                brk_move_color = "#00FF00"
+            elif brk_move_pct < 0:
+                brk_move_color = "#FF3131"
+            else:
+                brk_move_color = "#D1D1D1"
+    except Exception:
+        pass
+
+    brk_move_pct_w = None
+    brk_move_ui_w = "—"
+    brk_move_color_w = "#888888"
+    _b_anchor_w = float(d.get("brk_b_anchor_close_w", 0.0) or 0.0)
+    _b_anchor_ts_w = float(d.get("brk_b_anchor_ts_w", 0.0) or 0.0)
+    brk_b_anchor_dt_w = _fmt_last_event_ist(_b_anchor_ts_w) if _b_anchor_ts_w > 0 else "—"
+    try:
+        if _b_anchor_w > 0 and _ltp_num > 0:
+            brk_move_pct_w = ((_ltp_num / _b_anchor_w) - 1.0) * 100.0
+            brk_move_ui_w = f"{brk_move_pct_w:+.2f}%"
+            if brk_move_pct_w > 0:
+                brk_move_color_w = "#00FF00"
+            elif brk_move_pct_w < 0:
+                brk_move_color_w = "#FF3131"
+            else:
+                brk_move_color_w = "#D1D1D1"
+    except Exception:
+        pass
 
     # RS Rating (0-100 percentile from the master scanner). Colour ramp: ≥80 strong (green),
     # 60-79 neutral-green, 40-59 grey, <40 weak (red). `rs_rating` may be absent when SHM has
@@ -1746,6 +1880,33 @@ def format_ui_row(d):
         else:
             rs_rating_color = "#FF6666"
 
+    # After RST, b_count is reset; the next Donchian + EMA-stack breakout prints B1 (same as a cold cycle).
+    _lt_d_u = str(d.get("last_tag") or "").strip().upper()
+    _lt_w_u = str(d.get("last_tag_w") or "").strip().upper()
+    post_rst_hint_d = "Post-RST → next tag B1" if _lt_d_u == "RST" else ""
+    post_rst_hint_w = "Post-RST → next tag B1" if _lt_w_u == "RST" else ""
+    _pr_parts = []
+    if post_rst_hint_d:
+        _pr_parts.append("Daily: post-RST → B1")
+    if post_rst_hint_w:
+        _pr_parts.append("Weekly: post-RST → B1")
+    post_rst_hint_dw = "  |  ".join(_pr_parts) if _pr_parts else ""
+
+    try:
+        _sc_raw = d.get("setup_score")
+        _sc = int(_sc_raw) if _sc_raw is not None else compute_breakout_setup_score_row(d)
+    except (TypeError, ValueError):
+        _sc = compute_breakout_setup_score_row(d)
+    if _sc >= 75:
+        setup_score_color = "#00FF00"
+    elif _sc >= 55:
+        setup_score_color = "#FFB000"
+    elif _sc >= 40:
+        setup_score_color = "#D1D1D1"
+    else:
+        setup_score_color = "#FF6666"
+    setup_score_ui = str(_sc)
+
     d.update({
         'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': chp_color,
         'rs_rating': rs_rating_ui, 'rs_rating_color': rs_rating_color,
@@ -1767,6 +1928,13 @@ def format_ui_row(d):
         'mrs_rcvr_str': f"{float(d.get('mrs_rcvr_slope', 0.0)):+.3f}" + (" ↑SIG" if bool(d.get("mrs_rcvr", False)) else ""),
         'mrs_rcvr_color': "#00FFAA" if float(d.get("mrs_rcvr_slope", 0.0)) > 0 else "#555555",
         'brk_lvl': brk_disp,
+        'brk_move_pct': brk_move_ui,
+        'brk_move_band': brk_move_band,
+        'brk_move_color': brk_move_color,
+        'brk_b_anchor_dt': brk_b_anchor_dt,
+        'brk_move_pct_w': brk_move_ui_w,
+        'brk_move_color_w': brk_move_color_w,
+        'brk_b_anchor_dt_w': brk_b_anchor_dt_w,
         'brk_lvl_w': brk_w_disp,
         'tf_ema': tf_ema_disp,
         'ema_d_str': ema_d_str,
@@ -1782,6 +1950,9 @@ def format_ui_row(d):
         'm_rsi2_color': mrsi_color,
         'is_breakout': bool(d.get('is_breakout', False)),
         'state_name': str(d.get("state_name") or "LOCKED"),
+        'post_rst_hint_d': post_rst_hint_d,
+        'post_rst_hint_w': post_rst_hint_w,
+        'post_rst_hint_dw': post_rst_hint_dw,
         'last_tag': str(d.get("last_tag") or "—"),
         'b_count': int(d.get("b_count", 0) or 0),
         'e9t_count': int(d.get("e9t_count", 0) or 0),
@@ -1851,5 +2022,8 @@ def format_ui_row(d):
         'timing_age_mins_w': (
             f"{int(max(0.0, (time.time() - _ttw_ts) / 60.0))}m" if _ttw_ts > 0 else "—"
         ),
+        'setup_score': _sc,
+        'setup_score_ui': setup_score_ui,
+        'setup_score_color': setup_score_color,
     })
     return d

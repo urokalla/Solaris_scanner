@@ -38,6 +38,7 @@ class DatabaseManager:
     _brk_lvl_column_checked = False
     _mrs_prev_day_column_checked = False
     _mrs_0_cross_unix_column_checked = False
+    _mrs_0_cross_from_neg_days_checked = False
     _rs_prev_day_column_checked = False
     _w_rsi2_column_checked = False
 
@@ -284,30 +285,76 @@ class DatabaseManager:
         except Exception as e:
             logger.warning("Database: ensure_live_state_mrs_0_cross_unix_column: %s", e)
 
-    def upsert_mrs_0_cross_unix(self, symbol: str, unix_ts: float) -> None:
+    def ensure_live_state_mrs_0_cross_from_neg_days_column(self):
+        """Days spent below 0 before the latest mRS cross-up (master writes; dashboard reads)."""
+        if DatabaseManager._mrs_0_cross_from_neg_days_checked:
+            return
+        try:
+            self.ensure_live_state_table()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'live_state' AND column_name = 'mrs_0_cross_from_neg_days'
+                        """
+                    )
+                    if cur.fetchone() is None:
+                        cur.execute("ALTER TABLE live_state ADD COLUMN mrs_0_cross_from_neg_days DOUBLE PRECISION")
+                        conn.commit()
+                        logger.info("Database: added live_state.mrs_0_cross_from_neg_days")
+            DatabaseManager._mrs_0_cross_from_neg_days_checked = True
+        except Exception as e:
+            logger.warning("Database: ensure_live_state_mrs_0_cross_from_neg_days_column: %s", e)
+
+    def upsert_mrs_0_cross_unix(self, symbol: str, unix_ts: float, from_neg_days: float | None = None) -> None:
         """Record last mRS>0 cross-up instant (master only; advisory-locked vs other live_state writers)."""
         if not symbol or not np.isfinite(unix_ts) or float(unix_ts) <= 0:
             return
         self.ensure_live_state_mrs_0_cross_unix_column()
+        self.ensure_live_state_mrs_0_cross_from_neg_days_column()
         sym = str(symbol).strip()
         ts = float(unix_ts)
+        fd = None
+        if from_neg_days is not None:
+            try:
+                fv = float(from_neg_days)
+                if np.isfinite(fv) and fv >= 0:
+                    fd = fv
+            except Exception:
+                fd = None
         for attempt in range(5):
             try:
                 with self.get_connection() as conn:
                     try:
                         with conn.cursor() as cur:
                             acquire_live_state_xact_lock(cur)
-                            cur.execute(
-                                """
-                                INSERT INTO live_state AS ls (symbol, mrs_0_cross_unix) VALUES (%s, %s)
-                                ON CONFLICT (symbol) DO UPDATE SET
-                                    mrs_0_cross_unix = GREATEST(
-                                        COALESCE(ls.mrs_0_cross_unix, 0),
-                                        EXCLUDED.mrs_0_cross_unix
-                                    )
-                                """,
-                                (sym, ts),
-                            )
+                            if fd is None:
+                                cur.execute(
+                                    """
+                                    INSERT INTO live_state AS ls (symbol, mrs_0_cross_unix) VALUES (%s, %s)
+                                    ON CONFLICT (symbol) DO UPDATE SET
+                                        mrs_0_cross_unix = GREATEST(
+                                            COALESCE(ls.mrs_0_cross_unix, 0),
+                                            EXCLUDED.mrs_0_cross_unix
+                                        )
+                                    """,
+                                    (sym, ts),
+                                )
+                            else:
+                                cur.execute(
+                                    """
+                                    INSERT INTO live_state AS ls (symbol, mrs_0_cross_unix, mrs_0_cross_from_neg_days)
+                                    VALUES (%s, %s, %s)
+                                    ON CONFLICT (symbol) DO UPDATE SET
+                                        mrs_0_cross_unix = GREATEST(
+                                            COALESCE(ls.mrs_0_cross_unix, 0),
+                                            EXCLUDED.mrs_0_cross_unix
+                                        ),
+                                        mrs_0_cross_from_neg_days = EXCLUDED.mrs_0_cross_from_neg_days
+                                    """,
+                                    (sym, ts, fd),
+                                )
                         conn.commit()
                         return
                     except Exception:
@@ -343,6 +390,23 @@ class DatabaseManager:
                     return {r[0]: float(r[1]) for r in cur.fetchall()}
         except Exception as e:
             logger.warning("Database: get_mrs_0_cross_unix_map failed: %s", e)
+            return {}
+
+    def get_mrs_0_cross_from_neg_days_map(self, symbols):
+        """Return {symbol: days_below_zero_before_cross} for dashboard context."""
+        if not symbols:
+            return {}
+        self.ensure_live_state_mrs_0_cross_from_neg_days_column()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT symbol, mrs_0_cross_from_neg_days FROM live_state WHERE symbol IN %s AND mrs_0_cross_from_neg_days IS NOT NULL",
+                        (tuple(symbols),),
+                    )
+                    return {r[0]: float(r[1]) for r in cur.fetchall()}
+        except Exception as e:
+            logger.warning("Database: get_mrs_0_cross_from_neg_days_map failed: %s", e)
             return {}
 
     def upsert_mrs_0_cross_unix_fill_if_null_batch(self, rows):
@@ -389,6 +453,61 @@ class DatabaseManager:
                     time.sleep(0.05 * (2**attempt))
                     continue
                 logger.warning("Database: upsert_mrs_0_cross_unix_fill_if_null_batch failed: %s", e, exc_info=True)
+                return
+
+    def upsert_mrs_0_cross_days_fill_if_null_batch(self, rows):
+        """
+        Seed cross timing fields from weekly-history approximation when row is still NULL.
+        rows: list[(symbol, cross_unix, from_neg_days)]
+        """
+        if not rows:
+            return
+        self.ensure_live_state_mrs_0_cross_unix_column()
+        self.ensure_live_state_mrs_0_cross_from_neg_days_column()
+        payload = sorted(
+            (
+                (str(s).strip(), float(ts), float(fd))
+                for s, ts, fd in rows
+                if s and np.isfinite(ts) and float(ts) > 0 and np.isfinite(fd) and float(fd) >= 0
+            ),
+            key=lambda x: x[0],
+        )
+        if not payload:
+            return
+        for attempt in range(5):
+            try:
+                with self.get_connection() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            acquire_live_state_xact_lock(cur)
+                            execute_values(
+                                cur,
+                                """
+                                INSERT INTO live_state AS ls (symbol, mrs_0_cross_unix, mrs_0_cross_from_neg_days) VALUES %s
+                                ON CONFLICT (symbol) DO UPDATE SET
+                                    mrs_0_cross_unix = COALESCE(ls.mrs_0_cross_unix, EXCLUDED.mrs_0_cross_unix),
+                                    mrs_0_cross_from_neg_days = COALESCE(ls.mrs_0_cross_from_neg_days, EXCLUDED.mrs_0_cross_from_neg_days)
+                                """,
+                                payload,
+                            )
+                        conn.commit()
+                        return
+                    except Exception:
+                        try:
+                            if conn is not None and getattr(conn, "closed", 1) == 0:
+                                conn.rollback()
+                        except Exception:
+                            pass
+                        raise
+            except Exception as e:
+                emsg = str(e).lower()
+                is_conn_drop = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)) or (
+                    "connection already closed" in emsg or "server closed the connection" in emsg
+                )
+                if (_is_deadlock_exception(e) or is_conn_drop) and attempt < 4:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                logger.warning("Database: upsert_mrs_0_cross_days_fill_if_null_batch failed: %s", e, exc_info=True)
                 return
 
     def ensure_mrs_prev_day_column(self):

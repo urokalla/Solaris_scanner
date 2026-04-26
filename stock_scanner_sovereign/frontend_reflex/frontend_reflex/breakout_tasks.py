@@ -14,7 +14,7 @@ async def poll_sidecar_handler(self):
                 brk_stage=self.filter_brk_stage,
                 filter_mrs_grid=self.filter_mrs_grid,
                 filter_m_rsi2=self.filter_m_rsi2,
-                preset="ALL",
+                preset=str(getattr(self, "preset_mode", None) or "ALL").strip(),
                 sort_key=self.sort_sidecar_key,
                 sort_desc=self.sort_sidecar_desc,
                 mode="strategy",

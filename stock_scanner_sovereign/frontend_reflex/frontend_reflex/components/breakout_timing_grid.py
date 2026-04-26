@@ -6,7 +6,19 @@ from ..breakout_timing_state import BreakoutTimingState
 def breakout_timing_data_grid():
     header_row = rx.table.row(
         rx.table.column_header_cell(rx.text("SYMBOL", color="white"), color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("SCORE", color="white"),
+                rx.text(BreakoutTimingState.setup_score_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_setup_score,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(rx.text("PRICE", color="white"), color="white"),
+        rx.table.column_header_cell(rx.text("CHG%", color="white"), color="white"),
         rx.table.column_header_cell(
             rx.hstack(
                 rx.text("RS", color="white"),
@@ -18,7 +30,8 @@ def breakout_timing_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("CHG%", color="white"), color="white"),
+        rx.table.column_header_cell(rx.text("RVOL", color="white"), color="white"),
+        rx.table.column_header_cell(rx.text("W_MRS", color="white"), color="white"),
         rx.table.column_header_cell(rx.text("LAST TAG D", color="white"), color="white"),
         rx.table.column_header_cell(
             rx.hstack(
@@ -28,6 +41,15 @@ def breakout_timing_data_grid():
                 align_items="center",
                 cursor="pointer",
                 on_click=BreakoutTimingState.toggle_sort_when_d,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.vstack(
+                rx.text("% FROM B (D)", color="white", font_size="11px"),
+                rx.text("close → LTP", color="#888888", font_size="9px"),
+                spacing="0",
+                align_items="start",
             ),
             color="white",
         ),
@@ -43,8 +65,15 @@ def breakout_timing_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("RVOL", color="white"), color="white"),
-        rx.table.column_header_cell(rx.text("W_MRS", color="white"), color="white"),
+        rx.table.column_header_cell(
+            rx.vstack(
+                rx.text("% FROM B (W)", color="white", font_size="11px"),
+                rx.text("close → LTP", color="#888888", font_size="9px"),
+                spacing="0",
+                align_items="start",
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(rx.text("STATE D / W", color="white"), color="white"),
         rx.table.column_header_cell(rx.text("AGE D / W", color="white"), color="white"),
     )
@@ -66,29 +95,20 @@ def breakout_timing_data_grid():
                     ),
                     padding_y="0",
                 ),
-                rx.table.cell(r.get("ltp", "—"), color=r.get("chp_color", "#D1D1D1"), font_size="12px", padding_y="0"),
                 rx.table.cell(
-                    rx.text(r.get("rs_rating", "—"), color=r.get("rs_rating_color", "#D1D1D1"), font_weight="bold"),
+                    rx.text(
+                        r.get("setup_score_ui", "—"),
+                        color=r.get("setup_score_color", "#D1D1D1"),
+                        font_weight="bold",
+                    ),
                     font_size="12px",
                     padding_y="0",
                 ),
+                rx.table.cell(r.get("ltp", "—"), color=r.get("chp_color", "#D1D1D1"), font_size="12px", padding_y="0"),
                 rx.table.cell(r.get("chp", "—"), color=r.get("chp_color", "#D1D1D1"), font_size="11px", padding_y="0"),
                 rx.table.cell(
-                    rx.text(r.get("timing_last_tag", "—"), color=r.get("timing_last_tag_color", "#888888")),
-                    font_size="11px",
-                    padding_y="0",
-                ),
-                rx.table.cell(
-                    rx.text(r.get("timing_last_event_dt", "—"), color="#E0E0E0", font_size="10px"),
-                    padding_y="0",
-                ),
-                rx.table.cell(
-                    rx.text(r.get("timing_last_tag_w", "—"), color=r.get("timing_last_tag_color_w", "#888888")),
-                    font_size="11px",
-                    padding_y="0",
-                ),
-                rx.table.cell(
-                    rx.text(r.get("timing_last_event_dt_w", "—"), color="#E0E0E0", font_size="10px"),
+                    rx.text(r.get("rs_rating", "—"), color=r.get("rs_rating_color", "#D1D1D1"), font_weight="bold"),
+                    font_size="12px",
                     padding_y="0",
                 ),
                 rx.table.cell(
@@ -102,10 +122,74 @@ def breakout_timing_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.text(
-                        f"{r.get('timing_state_name', '—')} / {r.get('timing_state_name_w', '—')}",
-                        color="#D1D1D1",
-                        font_size="10px",
+                    rx.text(r.get("timing_last_tag", "—"), color=r.get("timing_last_tag_color", "#888888")),
+                    font_size="11px",
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.text(r.get("timing_last_event_dt", "—"), color="#E0E0E0", font_size="10px"),
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.vstack(
+                        rx.text(
+                            r.get("brk_move_pct", "—"),
+                            color=r.get("brk_move_color", "#D1D1D1"),
+                            font_weight="bold",
+                            font_size="10px",
+                        ),
+                        rx.text(
+                            r.get("brk_b_anchor_dt", "—"),
+                            color="#888888",
+                            font_size="9px",
+                        ),
+                        spacing="0",
+                        align_items="start",
+                    ),
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.text(r.get("timing_last_tag_w", "—"), color=r.get("timing_last_tag_color_w", "#888888")),
+                    font_size="11px",
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.text(r.get("timing_last_event_dt_w", "—"), color="#E0E0E0", font_size="10px"),
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.vstack(
+                        rx.text(
+                            r.get("brk_move_pct_w", "—"),
+                            color=r.get("brk_move_color_w", "#D1D1D1"),
+                            font_weight="bold",
+                            font_size="10px",
+                        ),
+                        rx.text(
+                            r.get("brk_b_anchor_dt_w", "—"),
+                            color="#888888",
+                            font_size="9px",
+                        ),
+                        spacing="0",
+                        align_items="start",
+                    ),
+                    padding_y="0",
+                ),
+                rx.table.cell(
+                    rx.vstack(
+                        rx.text(
+                            f"{r.get('timing_state_name', '—')} / {r.get('timing_state_name_w', '—')}",
+                            color="#D1D1D1",
+                            font_size="10px",
+                        ),
+                        rx.text(
+                            r.get("post_rst_hint_dw", ""),
+                            color="#FFB000",
+                            font_size="9px",
+                            font_weight="bold",
+                        ),
+                        spacing="0",
+                        align_items="start",
                     ),
                     padding_y="0",
                 ),

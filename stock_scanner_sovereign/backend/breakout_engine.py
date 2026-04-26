@@ -6,6 +6,7 @@ from .breakout_logic import (
     initial_sync_helper,
     main_loop_helper,
     format_ui_row,
+    compute_breakout_setup_score_row,
     _update_minimal_cycle_state,
     _update_minimal_cycle_state_weekly,
     _decode_shm_grid_status,
@@ -296,6 +297,19 @@ class BreakoutScanner:
 
     def get_ui_view(self, **kw):
         with self.lock: data = [v.copy() for v in self.results.values()]
+        # `SHMBridge.load_index_map()` replaces `idx_map` with a new dict when the master rewrites
+        # symbols_idx_map.json. We still hold the old dict on `sym_to_idx`, so SHM lookups can
+        # return another symbol's row → stale LTP/RV/CHG in UI and XLSX. Resync when the file changes.
+        try:
+            mp = getattr(self.shm, "map_path", None)
+            if mp and os.path.exists(mp):
+                mtime = os.path.getmtime(mp)
+                if mtime > float(getattr(self, "_shm_idx_map_mtime", 0.0)):
+                    self.shm.load_index_map()
+                    self._shm_idx_map_mtime = mtime
+        except Exception:
+            pass
+        self.sym_to_idx = self.shm.idx_map
         if not hasattr(self, "_cycle_backfill_ts"):
             self._cycle_backfill_ts = {}
         # mode="strategy" → /breakout: confirmed bar tags (B, E9CT, ET9DNWF21C, E21C, RST). No live CB overlay.
@@ -337,9 +351,11 @@ class BreakoutScanner:
             "cycle_state", "state_name", "below21_count",
             "b_count", "e9t_count", "e21c_count", "rst_count",
             "last_tag", "last_event_ts", "cycle_last_bar_key", "brk_lvl",
+            "brk_b_anchor_close", "brk_b_anchor_ts",
             "cycle_state_w", "state_name_w", "below21_count_w",
             "b_count_w", "e9t_count_w", "e21c_count_w", "rst_count_w",
             "last_tag_w", "last_event_ts_w", "cycle_last_bar_key_w", "brk_lvl_w",
+            "brk_b_anchor_close_w", "brk_b_anchor_ts_w",
         )
         for d in data:
             lt = str(d.get("last_tag") or "").strip()
@@ -535,6 +551,8 @@ class BreakoutScanner:
                 if str(d.get("timing_last_tag") or d.get("last_tag") or "").upper().startswith(("B", "CB"))
                 or str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "").upper().startswith(("B", "CB"))
             ]
+        for _row in data:
+            _row["setup_score"] = compute_breakout_setup_score_row(_row)
         sort_key = (kw.get("sort_key") or "").strip().lower()
         sort_desc = bool(kw.get("sort_desc", False))
 
@@ -576,6 +594,8 @@ class BreakoutScanner:
         elif sort_key in ("rs_rating", "rsr"):
             # rs_rating is still a raw int from SHM at this point (format_ui_row runs later).
             data.sort(key=lambda x: int(x.get("rs_rating", 0) or 0), reverse=sort_desc)
+        elif sort_key in ("setup_score", "setup", "rank", "brk_rank", "score"):
+            data.sort(key=lambda x: int(x.get("setup_score", 0) or 0), reverse=sort_desc)
         elif sort_key == "symbol":
             data.sort(key=lambda x: str(x.get("symbol", "") or "").lower(), reverse=sort_desc)
         else:
