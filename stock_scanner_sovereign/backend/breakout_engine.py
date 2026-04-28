@@ -21,6 +21,20 @@ from .scanner_shm import SHMBridge
 _IST_TIMING = ZoneInfo("Asia/Kolkata")
 
 
+def _ema_last(values: np.ndarray, n: int) -> float:
+    try:
+        arr = np.asarray(values, dtype=np.float64)
+    except Exception:
+        return float("nan")
+    if arr.size < max(2, int(n)):
+        return float("nan")
+    a = 2.0 / (float(n) + 1.0)
+    out = float(arr[0])
+    for i in range(1, int(arr.size)):
+        out = a * float(arr[i]) + (1.0 - a) * out
+    return out
+
+
 def _ltp_pct_vs_anchor(x: dict, anchor_key: str) -> float:
     """Sort key: percent move LTP vs anchor (B close or first-cross LTP)."""
     try:
@@ -555,6 +569,24 @@ class BreakoutScanner:
             _now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
             for d in data:
                 try:
+                    # Timing overlay can run even when EMA stack feature is disabled.
+                    # Backfill daily EMA9/EMA21 from the in-memory daily history so E-family
+                    # live transitions (E9CT/ET9/E21C) can still be reflected intraday.
+                    try:
+                        if d.get("ema9_d") is None or d.get("ema21_d") is None:
+                            sym = str(d.get("symbol") or "")
+                            buf = self.buffers.get(sym)
+                            hv = buf.get_ordered_view() if buf is not None else None
+                            if hv is not None and len(hv) >= 22:
+                                cls = np.asarray(hv[:, 4], dtype=np.float64)
+                                e9 = _ema_last(cls, 9)
+                                e21 = _ema_last(cls, 21)
+                                if np.isfinite(e9):
+                                    d["ema9_d"] = float(e9)
+                                if np.isfinite(e21):
+                                    d["ema21_d"] = float(e21)
+                    except Exception:
+                        pass
                     _qts = d.pop("_shm_quote_ts", None)
                     _update_live_timing_breakout_status(
                         d, float(d.get("ltp", 0.0) or 0.0), _now_ist, _qts
@@ -567,6 +599,7 @@ class BreakoutScanner:
                             stored = self.results.get(sym)
                             if stored is not None:
                                 for k in (
+                                    "ema9_d", "ema21_d",
                                     "timing_last_tag", "timing_last_event_ts",
                                     "timing_last_tag_w", "timing_last_event_ts_w",
                                     "cb_pending_day_d", "cb_pending_tag_d", "cb_pending_ts_d",

@@ -394,11 +394,43 @@ def _update_live_timing_breakout_status(
             return f"C{t}"
         return f"C{t}" if t else "CB1"
 
+    def _live_e_base_tag(raw_tag: str, *, ema9_key: str, ema21_key: str, e9_count_key: str, e21_count_key: str) -> str:
+        u = str(raw_tag or "").strip().upper()
+        if not (u.startswith("E9CT") or u.startswith("E21C") or u == TAG_ET9_WAIT_F21C):
+            return raw_tag
+        try:
+            e9 = float(r.get(ema9_key) or 0.0)
+            e21 = float(r.get(ema21_key) or 0.0)
+            px = float(ltp or 0.0)
+        except (TypeError, ValueError):
+            return raw_tag
+        if px <= 0.0 or e9 <= 0.0 or e21 <= 0.0:
+            return raw_tag
+        # Live transition view for E-family only (read-only overlay; breakout engine untouched).
+        if px <= e9:
+            return TAG_ET9_WAIT_F21C
+        if px > e21:
+            nxt = max(1, int(r.get(e21_count_key, 0) or 0) + (0 if u.startswith("E21C") else 1))
+            return f"E21C{nxt}"
+        if px > e9:
+            if u.startswith("E9CT"):
+                return u
+            nxt = max(1, int(r.get(e9_count_key, 0) or 0) + (0 if u.startswith("E9CT") else 1))
+            return _tag_e9(nxt)
+        return raw_tag
+
     def _stream(*, now_id: str, finalize: bool, brk_key: str, last_tag_key: str, last_ts_key: str, b_count_key: str,
+                ema9_key: str, ema21_key: str, e9_count_key: str, e21_count_key: str,
                 timing_tag_key: str, timing_ts_key: str, pend_id_key: str, pend_tag_key: str, pend_ts_key: str,
                 pend_prev_key: str, sustain_base_key: str, cb_count_key: str, live_px_key: str, live_id_key: str,
                 prev_id_key: str, prev_ltp_key: str, fail_id_key: str, fail_ts_key: str, is_weekly: bool):
-        base_tag = str(r.get(last_tag_key) or "—")
+        base_tag = _live_e_base_tag(
+            str(r.get(last_tag_key) or "—"),
+            ema9_key=ema9_key,
+            ema21_key=ema21_key,
+            e9_count_key=e9_count_key,
+            e21_count_key=e21_count_key,
+        )
         base_ts = float(r.get(last_ts_key, 0.0) or 0.0)
         brk = float(r.get(brk_key) or 0.0)
         prev_ltp = float(r.get(prev_ltp_key) or 0.0) if str(r.get(prev_id_key) or "") == now_id else 0.0
@@ -439,9 +471,8 @@ def _update_live_timing_breakout_status(
                             same_bucket = dt.date().isoformat() == now_id
                     if not same_bucket:
                         cb_idx = max(1, base_b + 1)
-            # This branch is entered ONLY for Donchian breakout crossing events.
-            # Always use breakout-family timing tags (CBn), never CE*.
-            ctag = f"CB{cb_idx}"
+            # Donchian crossing event: keep CB* for B/RST families, map E* to CE*.
+            ctag = _c_tag(base_tag, cb_idx)
             r[pend_id_key], r[pend_tag_key], r[pend_ts_key], r[pend_prev_key] = now_id, ctag, cross_ts, str(r.get(timing_tag_key) or base_tag)
             r[live_px_key], r[live_id_key] = float(ltp), now_id
 
@@ -492,6 +523,7 @@ def _update_live_timing_breakout_status(
 
     _stream(
         now_id=today, finalize=cutoff, brk_key="brk_lvl", last_tag_key="last_tag", last_ts_key="last_event_ts", b_count_key="b_count",
+        ema9_key="ema9_d", ema21_key="ema21_d", e9_count_key="e9t_count", e21_count_key="e21c_count",
         timing_tag_key="timing_last_tag", timing_ts_key="timing_last_event_ts",
         pend_id_key="cb_pending_day_d", pend_tag_key="cb_pending_tag_d", pend_ts_key="cb_pending_ts_d", pend_prev_key="cb_pending_prev_tag_d",
         sustain_base_key="cb_sustain_base_tag_d",
@@ -501,6 +533,7 @@ def _update_live_timing_breakout_status(
     )
     _stream(
         now_id=week_id, finalize=weekly_finalize, brk_key="brk_lvl_w", last_tag_key="last_tag_w", last_ts_key="last_event_ts_w", b_count_key="b_count_w",
+        ema9_key="ema9_w", ema21_key="ema21_w", e9_count_key="e9t_count_w", e21_count_key="e21c_count_w",
         timing_tag_key="timing_last_tag_w", timing_ts_key="timing_last_event_ts_w",
         pend_id_key="cb_pending_week_w", pend_tag_key="cb_pending_tag_w", pend_ts_key="cb_pending_ts_w", pend_prev_key="cb_pending_prev_tag_w",
         sustain_base_key="cb_sustain_base_tag_w",
