@@ -10,7 +10,7 @@ async def poll_breakout_timing_handler(self):
     while True:
         await asyncio.sleep(max(0.5, float(settings.DASHBOARD_POLL_INTERVAL_SEC)))
         async with self:
-            scanner = get_breakout_scanner(universe=self.universe)
+            scanner = get_breakout_scanner(universe=self.universe, role="timing")
             view = scanner.get_ui_view(
                 page=self.current_page,
                 page_size=self.page_size,

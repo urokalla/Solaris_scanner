@@ -1,4 +1,4 @@
-import threading, time, os, numpy as np
+import threading, time, os, json, numpy as np
 from datetime import datetime
 from utils.zone_info import ZoneInfo
 from utils.pipeline_bridge import PipelineBridge; from utils.ring_buffer import RingBuffer
@@ -19,6 +19,19 @@ from .breakout_logic import (
 from .scanner_shm import SHMBridge
 
 _IST_TIMING = ZoneInfo("Asia/Kolkata")
+_TIMING_SNAPSHOT_FIELDS = (
+    "timing_last_tag", "timing_last_event_ts",
+    "timing_last_tag_w", "timing_last_event_ts_w",
+    "cb_pending_day_d", "cb_pending_tag_d", "cb_pending_ts_d",
+    "cb_pending_prev_tag_d", "cb_sustain_base_tag_d",
+    "cb_last_confirm_day_d", "cb_count_d", "cb_live_entry_px_d", "cb_live_entry_day_d",
+    "cb_pending_week_w", "cb_pending_tag_w", "cb_pending_ts_w",
+    "cb_pending_prev_tag_w", "cb_sustain_base_tag_w",
+    "cb_last_confirm_week_w", "cb_count_w", "cb_live_entry_px_w", "cb_live_entry_week_w",
+    "cb_prev_day_d", "cb_prev_ltp_d", "cb_prev_week_w", "cb_prev_ltp_w",
+    "cb_not_sustained_day_d", "cb_not_sustained_ts_d",
+    "cb_not_sustained_week_w", "cb_not_sustained_ts_w",
+)
 
 
 def _ema_last(values: np.ndarray, n: int) -> float:
@@ -75,7 +88,7 @@ def _timing_live_daily(d: dict, today_iso: str) -> bool:
 
 
 def _timing_sustained_daily(d: dict, today_iso: str) -> bool:
-    """Today's daily live breakout still holding above brk_lvl: live pending C* or sustained C*S today."""
+    """Daily sustained/live hold above brk_lvl: C*S hold (any day) or today's live pending C*."""
     brk = float(d.get("brk_lvl") or 0.0)
     ltp = float(d.get("ltp") or 0.0)
     if brk <= 0 or ltp <= brk:
@@ -83,13 +96,15 @@ def _timing_sustained_daily(d: dict, today_iso: str) -> bool:
     ttag = str(d.get("timing_last_tag") or "").strip().upper()
     if not ttag.startswith("C"):
         return False
-    if ttag.endswith("S") and _timing_iso_from_ts(d.get("timing_last_event_ts")) == today_iso:
+    # Sustained tag should remain visible while still holding above breakout,
+    # even if the sustain event happened on a prior day.
+    if ttag.endswith("S"):
         return True
     return _timing_live_daily(d, today_iso)
 
 
 def _timing_sustained_weekly(d: dict, today_iso: str) -> bool:
-    """Weekly sustained breakout: C*S on weekly tag today, or live weekly pending above brk_lvl_w."""
+    """Weekly sustained/live hold above brk_lvl_w: C*S hold (any day) or live weekly pending."""
     brk = float(d.get("brk_lvl_w") or 0.0)
     ltp = float(d.get("ltp") or 0.0)
     if brk <= 0 or ltp <= brk:
@@ -97,7 +112,7 @@ def _timing_sustained_weekly(d: dict, today_iso: str) -> bool:
     ttag = str(d.get("timing_last_tag_w") or "").strip().upper()
     if not ttag.startswith("C"):
         return False
-    if ttag.endswith("S") and _timing_iso_from_ts(d.get("timing_last_event_ts_w")) == today_iso:
+    if ttag.endswith("S"):
         return True
     return bool(str(d.get("cb_pending_week_w") or "").strip()) and bool(str(d.get("cb_pending_tag_w") or "").strip())
 
@@ -294,6 +309,56 @@ class BreakoutScanner:
                     break
                 time.sleep(2)
         self.update_universe(u, symbols)
+        self._timing_snapshot_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "data",
+            ".timing_state_snapshot.json",
+        )
+        self._timing_snapshot_flush_ts = 0.0
+        self._load_timing_snapshot()
+
+    def _load_timing_snapshot(self) -> None:
+        p = getattr(self, "_timing_snapshot_path", "")
+        if not p or not os.path.isfile(p):
+            return
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                snap = json.load(f)
+            if not isinstance(snap, dict):
+                return
+            with self.lock:
+                for sym, fields in snap.items():
+                    row = self.results.get(sym)
+                    if row is None or not isinstance(fields, dict):
+                        continue
+                    for k in _TIMING_SNAPSHOT_FIELDS:
+                        if k in fields:
+                            row[k] = fields[k]
+        except Exception:
+            pass
+
+    def _flush_timing_snapshot(self, force: bool = False) -> None:
+        p = getattr(self, "_timing_snapshot_path", "")
+        if not p:
+            return
+        now = float(time.time())
+        if not force and (now - float(getattr(self, "_timing_snapshot_flush_ts", 0.0))) < 5.0:
+            return
+        snap = {}
+        try:
+            with self.lock:
+                for sym, row in self.results.items():
+                    fields = {k: row.get(k) for k in _TIMING_SNAPSHOT_FIELDS if k in row}
+                    if any(v not in (None, "", 0, 0.0) for v in fields.values()):
+                        snap[sym] = fields
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = f"{p}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(snap, f, separators=(",", ":"))
+            os.replace(tmp, p)
+            self._timing_snapshot_flush_ts = now
+        except Exception:
+            pass
 
     def update_params(self, **p):
         """Merge runtime knobs. Window overrides: mrs_signal_period, pivot_high_window, min_intraday_bars_for_breakout (see docs/quant_rs_accuracy.md)."""
@@ -362,6 +427,7 @@ class BreakoutScanner:
             self.udai_ohlcv = {s: v for s, v in getattr(self, "udai_ohlcv", {}).items() if s in new_buffers}
             self._cycle_backfill_ts = {s: v for s, v in getattr(self, "_cycle_backfill_ts", {}).items() if s in new_buffers}
         threading.Thread(target=initial_sync_helper, args=(self,), daemon=True).start()
+        self._load_timing_snapshot()
 
     def start_scanning(self, **kwargs):
         self.is_scanning = True
@@ -423,11 +489,11 @@ class BreakoutScanner:
             "cycle_state", "state_name", "below21_count",
             "b_count", "e9t_count", "e21c_count", "rst_count",
             "last_tag", "last_event_ts", "cycle_last_bar_key", "brk_lvl",
-            "brk_b_anchor_close", "brk_b_anchor_ts",
+            "brk_b_anchor_close", "brk_b_anchor_level", "brk_b_anchor_ts",
             "cycle_state_w", "state_name_w", "below21_count_w",
             "b_count_w", "e9t_count_w", "e21c_count_w", "rst_count_w",
             "last_tag_w", "last_event_ts_w", "cycle_last_bar_key_w", "brk_lvl_w",
-            "brk_b_anchor_close_w", "brk_b_anchor_ts_w",
+            "brk_b_anchor_close_w", "brk_b_anchor_level_w", "brk_b_anchor_ts_w",
             "_wcycle_v",
         )
         for d in data:
@@ -437,12 +503,21 @@ class BreakoutScanner:
             brk_w_ok = float(d.get("brk_lvl_w") or 0.0) > 0.0
             _wcv = int(d.get("_wcycle_v") or 0)
             _need_cycle_refresh = _wcv < WEEKLY_CYCLE_PARITY_VERSION
+            # Persist used to omit brk_b_anchor_level(_w); rows could have tags + brk_lvl_w but
+            # anchor 0 → SINCE BRK % fell back to rolling Donchian (~2%) instead of fixed B (~12%).
+            _lw_u = str(ltw).strip().upper()
+            _need_anchor_w = (
+                brk_w_ok
+                and _lw_u not in ("", "—", "RST")
+                and float(d.get("brk_b_anchor_level_w") or 0.0) <= 0.0
+            )
             if (
                 lt not in ("", "—")
                 and ltw not in ("", "—")
                 and brk_ok
                 and brk_w_ok
                 and not _need_cycle_refresh
+                and not _need_anchor_w
             ):
                 continue
             sym = str(d.get("symbol") or "").strip()
@@ -599,23 +674,7 @@ class BreakoutScanner:
                             stored = self.results.get(sym)
                             if stored is not None:
                                 for k in (
-                                    "ema9_d", "ema21_d",
-                                    "timing_last_tag", "timing_last_event_ts",
-                                    "timing_last_tag_w", "timing_last_event_ts_w",
-                                    "cb_pending_day_d", "cb_pending_tag_d", "cb_pending_ts_d",
-                                    "cb_pending_prev_tag_d",
-                                    "cb_sustain_base_tag_d",
-                                    "cb_last_confirm_day_d", "cb_count_d",
-                                    "cb_live_entry_px_d", "cb_live_entry_day_d",
-                                    "cb_pending_week_w", "cb_pending_tag_w", "cb_pending_ts_w",
-                                    "cb_pending_prev_tag_w",
-                                    "cb_sustain_base_tag_w",
-                                    "cb_last_confirm_week_w", "cb_count_w",
-                                    "cb_live_entry_px_w", "cb_live_entry_week_w",
-                                    "cb_prev_day_d", "cb_prev_ltp_d",
-                                    "cb_prev_week_w", "cb_prev_ltp_w",
-                                    "cb_not_sustained_day_d", "cb_not_sustained_ts_d",
-                                    "cb_not_sustained_week_w", "cb_not_sustained_ts_w",
+                                    "ema9_d", "ema21_d", *_TIMING_SNAPSHOT_FIELDS
                                 ):
                                     if k in d:
                                         stored[k] = d[k]
@@ -623,6 +682,7 @@ class BreakoutScanner:
                         pass
                 except Exception:
                     pass
+            self._flush_timing_snapshot()
         sq = (kw.get("search") or "").upper()
         # Sidecar v2 uses Pine-parity state_name + last_tag.
         st = (kw.get("brk_stage") or kw.get("status") or "ALL").strip().upper()
@@ -765,7 +825,32 @@ class BreakoutScanner:
             data.sort(key=lambda x: str(x.get("symbol", "") or "").lower(), reverse=sort_desc)
         else:
             data.sort(key=lambda x: float(x.get("last_event_ts", 0.0) or 0.0), reverse=True)
-        data = [format_ui_row(d) for d in data]
+        _raw_rows = list(data)
+        data = [format_ui_row(d) for d in _raw_rows]
+        # Final display guard: enforce Rule A for SINCE BRK % on rendered rows.
+        # D: breakout-level anchor (brk_b_anchor_level -> brk_lvl)
+        # W: breakout-level anchor (brk_b_anchor_level_w -> brk_lvl_w)
+        for i, raw in enumerate(_raw_rows):
+            try:
+                ltp = float(raw.get("ltp") or 0.0)
+            except Exception:
+                ltp = 0.0
+            if ltp <= 0.0:
+                continue
+            try:
+                ad = float(raw.get("brk_b_anchor_level", 0.0) or 0.0)
+                if ad <= 0.0:
+                    ad = float(raw.get("brk_lvl", 0.0) or 0.0)
+                data[i]["brk_move_live_pct"] = f"{((ltp / ad) - 1.0) * 100.0:+.2f}%" if ad > 0.0 else "—"
+            except Exception:
+                pass
+            try:
+                aw = float(raw.get("brk_b_anchor_level_w", 0.0) or 0.0)
+                if aw <= 0.0:
+                    aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
+                data[i]["brk_move_live_pct_w"] = f"{((ltp / aw) - 1.0) * 100.0:+.2f}%" if aw > 0.0 else "—"
+            except Exception:
+                pass
         p, ps = kw.get("page", 1), kw.get("page_size", 50)
         return {"results": data[(p-1)*ps : p*ps], "total_count": len(data)}
 

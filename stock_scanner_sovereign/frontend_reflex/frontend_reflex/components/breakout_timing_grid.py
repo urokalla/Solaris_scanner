@@ -105,25 +105,13 @@ def breakout_timing_data_grid():
             color="white",
         ),
         rx.table.column_header_cell(
-            rx.vstack(
-                rx.hstack(
-                    rx.text("% FROM B (D)", color="white", font_size="11px"),
-                    rx.text(BreakoutTimingState.pct_from_b_d_sort_arrow, color="#00E5FF", font_size="10px"),
-                    spacing="1",
-                    align_items="center",
-                    cursor="pointer",
-                    on_click=BreakoutTimingState.toggle_sort_pct_from_b_d,
-                ),
-                rx.hstack(
-                    rx.text("SINCE BRK % (D)", color="#00E5FF", font_size="10px"),
-                    rx.text(BreakoutTimingState.pct_live_d_sort_arrow, color="#00E5FF", font_size="10px"),
-                    spacing="1",
-                    align_items="center",
-                    cursor="pointer",
-                    on_click=BreakoutTimingState.toggle_sort_pct_live_d,
-                ),
-                spacing="0",
-                align_items="start",
+            rx.hstack(
+                rx.text("SINCE BRK % (D)", color="#00E5FF", font_size="11px"),
+                rx.text(BreakoutTimingState.pct_live_d_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_pct_live_d,
             ),
             color="white",
         ),
@@ -150,25 +138,13 @@ def breakout_timing_data_grid():
             color="white",
         ),
         rx.table.column_header_cell(
-            rx.vstack(
-                rx.hstack(
-                    rx.text("% FROM B (W)", color="white", font_size="11px"),
-                    rx.text(BreakoutTimingState.pct_from_b_w_sort_arrow, color="#00E5FF", font_size="10px"),
-                    spacing="1",
-                    align_items="center",
-                    cursor="pointer",
-                    on_click=BreakoutTimingState.toggle_sort_pct_from_b_w,
-                ),
-                rx.hstack(
-                    rx.text("SINCE BRK % (W)", color="#00E5FF", font_size="10px"),
-                    rx.text(BreakoutTimingState.pct_live_w_sort_arrow, color="#00E5FF", font_size="10px"),
-                    spacing="1",
-                    align_items="center",
-                    cursor="pointer",
-                    on_click=BreakoutTimingState.toggle_sort_pct_live_w,
-                ),
-                spacing="0",
-                align_items="start",
+            rx.hstack(
+                rx.text("SINCE BRK % (W)", color="#00E5FF", font_size="11px"),
+                rx.text(BreakoutTimingState.pct_live_w_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_pct_live_w,
             ),
             color="white",
         ),
@@ -218,7 +194,10 @@ def breakout_timing_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.text(r.get("timing_last_tag", "—"), color=r.get("timing_last_tag_color", "#888888")),
+                    rx.text(
+                        f"{r.get('last_tag', '—')} / {r.get('timing_last_tag', '—')}",
+                        color=r.get("last_tag_color", "#888888"),
+                    ),
                     font_size="11px",
                     padding_y="0",
                 ),
@@ -227,31 +206,19 @@ def breakout_timing_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.vstack(
-                        rx.text(
-                            r.get("brk_move_pct", "—"),
-                            color=r.get("brk_move_color", "#D1D1D1"),
-                            font_weight="bold",
-                            font_size="10px",
-                        ),
-                        rx.text(
-                            r.get("brk_b_anchor_dt", "—"),
-                            color="#888888",
-                            font_size="9px",
-                        ),
-                        rx.text(
-                            r.get("brk_move_live_pct", "—"),
-                            color=r.get("brk_move_live_color", "#666666"),
-                            font_weight="bold",
-                            font_size="10px",
-                        ),
-                        spacing="0",
-                        align_items="start",
+                    rx.text(
+                        r.get("brk_move_live_pct", "—"),
+                        color=r.get("brk_move_live_color", "#666666"),
+                        font_weight="bold",
+                        font_size="10px",
                     ),
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.text(r.get("timing_last_tag_w", "—"), color=r.get("timing_last_tag_color_w", "#888888")),
+                    rx.text(
+                        f"{r.get('last_tag_w', '—')} / {r.get('timing_last_tag_w', '—')}",
+                        color=r.get("last_tag_color_w", "#888888"),
+                    ),
                     font_size="11px",
                     padding_y="0",
                 ),
@@ -260,26 +227,11 @@ def breakout_timing_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.vstack(
-                        rx.text(
-                            r.get("brk_move_pct_w", "—"),
-                            color=r.get("brk_move_color_w", "#D1D1D1"),
-                            font_weight="bold",
-                            font_size="10px",
-                        ),
-                        rx.text(
-                            r.get("brk_b_anchor_dt_w", "—"),
-                            color="#888888",
-                            font_size="9px",
-                        ),
-                        rx.text(
-                            r.get("brk_move_live_pct_w", "—"),
-                            color=r.get("brk_move_live_color_w", "#666666"),
-                            font_weight="bold",
-                            font_size="10px",
-                        ),
-                        spacing="0",
-                        align_items="start",
+                    rx.text(
+                        r.get("brk_move_live_pct_w", "—"),
+                        color=r.get("brk_move_live_color_w", "#666666"),
+                        font_weight="bold",
+                        font_size="10px",
                     ),
                     padding_y="0",
                 ),

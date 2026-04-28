@@ -128,14 +128,14 @@ class BreakoutTimingState(rx.State):
         u = main.universe
         async with self:
             self.universe = u
-        brk = get_breakout_scanner(universe=u)
+        brk = get_breakout_scanner(universe=u, role="timing")
         brk.update_universe(u, None)
         return BreakoutTimingState.poll_timing
 
     def set_universe(self, u: str):
         self.universe, self.current_page = u, 1
         self.search_query = ""
-        get_breakout_scanner(universe=u).update_universe(u, None)
+        get_breakout_scanner(universe=u, role="timing").update_universe(u, None)
 
     def set_search_query(self, q: str):
         self.search_query, self.current_page = (q or ""), 1

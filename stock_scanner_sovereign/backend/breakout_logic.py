@@ -381,7 +381,11 @@ def _update_live_timing_breakout_status(
     week_id = f"{int(now_dt.isocalendar().year)}-W{int(now_dt.isocalendar().week):02d}"
     cutoff = (now_dt.hour, now_dt.minute) >= (15, 30)
     weekly_finalize = now_dt.weekday() == 4 and cutoff
-
+    in_cash_session = (
+        now_dt.weekday() < 5
+        and (now_dt.hour, now_dt.minute) >= (9, 15)
+        and (now_dt.hour, now_dt.minute) <= (15, 30)
+    )
     def _c_tag(base_tag: str, cb_idx: int) -> str:
         t = str(base_tag or "").strip().upper()
         if t.startswith("B") or t.startswith("RST"):
@@ -398,26 +402,30 @@ def _update_live_timing_breakout_status(
         u = str(raw_tag or "").strip().upper()
         if not (u.startswith("E9CT") or u.startswith("E21C") or u == TAG_ET9_WAIT_F21C):
             return raw_tag
+        # Strict mode: timing overlay must follow actual cycle base tag.
+        # Do not auto-upgrade E9CT -> E21C from LTP alone (caused wrong CE21 tags).
+        return raw_tag
+
+    def _is_sustain_hold(base_tag: str, *, brk: float, ema9_key: str, ema21_key: str) -> bool:
+        t = str(base_tag or "").strip().upper()
         try:
             e9 = float(r.get(ema9_key) or 0.0)
             e21 = float(r.get(ema21_key) or 0.0)
-            px = float(ltp or 0.0)
         except (TypeError, ValueError):
-            return raw_tag
-        if px <= 0.0 or e9 <= 0.0 or e21 <= 0.0:
-            return raw_tag
-        # Live transition view for E-family only (read-only overlay; breakout engine untouched).
-        if px <= e9:
-            return TAG_ET9_WAIT_F21C
-        if px > e21:
-            nxt = max(1, int(r.get(e21_count_key, 0) or 0) + (0 if u.startswith("E21C") else 1))
-            return f"E21C{nxt}"
-        if px > e9:
-            if u.startswith("E9CT"):
-                return u
-            nxt = max(1, int(r.get(e9_count_key, 0) or 0) + (0 if u.startswith("E9CT") else 1))
-            return _tag_e9(nxt)
-        return raw_tag
+            e9, e21 = 0.0, 0.0
+        if t.startswith(("B", "RST")):
+            return brk > 0.0 and ltp > brk
+        if t.startswith("E9CT"):
+            return e9 > 0.0 and ltp > e9
+        if t.startswith("E21C"):
+            return e21 > 0.0 and ltp > e21
+        return False
+    def _allow_passive_hold_promote(base_tag: str) -> bool:
+        # Passive hold promotion is safe only for E-family timing overlays.
+        # For B/RST families we should print CB* only from an actual cross/pending path,
+        # otherwise stale RST rows can look like CB1 without a real fresh breakout.
+        t = str(base_tag or "").strip().upper()
+        return t.startswith("E9CT") or t == TAG_ET9_WAIT_F21C or t.startswith("E21C")
 
     def _stream(*, now_id: str, finalize: bool, brk_key: str, last_tag_key: str, last_ts_key: str, b_count_key: str,
                 ema9_key: str, ema21_key: str, e9_count_key: str, e21_count_key: str,
@@ -443,11 +451,59 @@ def _update_live_timing_breakout_status(
         except (TypeError, ValueError, ZeroDivisionError):
             prev_close = 0.0
         crossed = bool(brk > 0 and ltp > brk and ((prev_ltp > 0 and prev_ltp <= brk) or (prev_ltp <= 0 and prev_close > 0 and prev_close <= brk)))
+        # Do not create new daily/weekly timing cross events outside trading session.
+        if crossed and not in_cash_session:
+            crossed = False
 
         pend_id = str(r.get(pend_id_key) or "")
         pend_tag = str(r.get(pend_tag_key) or "")
         sustain_base = str(r.get(sustain_base_key) or "")
         cur_timing = str(r.get(timing_tag_key) or "")
+        # Weekly anchor healing: if CB weekly tag exists but live entry was overwritten to current LTP,
+        # restore to fixed weekly breakout anchor (keeps SINCE BRK % meaningful globally).
+        if is_weekly and cur_timing.startswith("CB"):
+            try:
+                _anchor_w = float(r.get("brk_b_anchor_level_w", 0.0) or 0.0)
+                if _anchor_w <= 0.0:
+                    _anchor_w = float(r.get("brk_b_anchor_close_w", 0.0) or 0.0)
+                if _anchor_w <= 0.0:
+                    _anchor_w = float(r.get("brk_lvl_w", 0.0) or 0.0)
+                if _anchor_w > 0.0:
+                    r[live_px_key] = _anchor_w
+            except Exception:
+                pass
+        def _week_id(ts_val: float) -> str:
+            try:
+                t = float(ts_val or 0.0)
+                if t <= 0.0:
+                    return ""
+                iso = datetime.fromtimestamp(t, tz=_IST).isocalendar()
+                return f"{int(iso.year)}-W{int(iso.week):02d}"
+            except Exception:
+                return ""
+        if is_weekly and not finalize and cur_timing.endswith("S"):
+            # Strip S only when the *timing event* falls in the developing ISO week (intraday
+            # cross this week). Do not strip when pending bucket is W18 but the event is an
+            # older week (e.g. Apr 10 breakout sustained into later weeks → keep CB3S).
+            ts_week = _week_id(float(r.get(timing_ts_key, 0.0) or 0.0))
+            if ts_week and ts_week == now_id:
+                cur_timing = cur_timing[:-1]
+                r[timing_tag_key] = cur_timing
+        cur_timing_ts = float(r.get(timing_ts_key, 0.0) or 0.0)
+        # Heal legacy non-session timing timestamps (e.g. 00:xx artifacts).
+        # Do NOT remap purely by age: sustained rows can legitimately keep an old session
+        # EOD ts; swapping to last_event_ts_* here caused "correct for one poll then 2024…".
+        if cur_timing.startswith("C") and (cur_timing_ts > 0 and not _is_nse_cash_session_ts(cur_timing_ts)):
+            base_evt_ts = float(r.get(last_ts_key, 0.0) or 0.0)
+            if base_evt_ts > 0 and _is_nse_cash_session_ts(base_evt_ts):
+                r[timing_ts_key] = base_evt_ts
+                cur_timing_ts = base_evt_ts
+        # Persist sustained tag across day rollover while hold condition remains valid.
+        # This avoids midnight IST turning CBxS -> CBx pending before market finalize.
+        if cur_timing.endswith("S") and brk > 0 and ltp > brk:
+            crossed = False
+            if not sustain_base:
+                r[sustain_base_key] = base_tag
         # Keep sustained timing event immutable for the same base cycle tag.
         if cur_timing.endswith("S") and sustain_base and sustain_base == base_tag:
             crossed = False
@@ -456,21 +512,9 @@ def _update_live_timing_breakout_status(
                 cb_idx = 1
             else:
                 base_b = max(int(r.get(b_count_key, 0) or 0), _infer_b_count_from_tag(base_tag))
-                # Live timing page: if base B is from a prior bar bucket, crossing now implies next B.
-                # Example: base B2 (yesterday) + live cross today => CB3. If base already updated to
-                # B3 in the same bucket, keep CB3 (not CB4).
+                # Timing tag index must mirror current base B index.
+                # Do NOT auto-increment across day/week rollover.
                 cb_idx = max(1, base_b)
-                if str(base_tag or "").strip().upper().startswith("B"):
-                    evt_ts = float(r.get(last_ts_key, 0.0) or 0.0)
-                    same_bucket = False
-                    if evt_ts > 0.0:
-                        dt = datetime.fromtimestamp(evt_ts, tz=_IST)
-                        if is_weekly:
-                            same_bucket = f"{int(dt.isocalendar().year)}-W{int(dt.isocalendar().week):02d}" == now_id
-                        else:
-                            same_bucket = dt.date().isoformat() == now_id
-                    if not same_bucket:
-                        cb_idx = max(1, base_b + 1)
             # Donchian crossing event: keep CB* for B/RST families, map E* to CE*.
             ctag = _c_tag(base_tag, cb_idx)
             r[pend_id_key], r[pend_tag_key], r[pend_ts_key], r[pend_prev_key] = now_id, ctag, cross_ts, str(r.get(timing_tag_key) or base_tag)
@@ -478,9 +522,41 @@ def _update_live_timing_breakout_status(
 
         pend_id = str(r.get(pend_id_key) or "")
         pend_tag = str(r.get(pend_tag_key) or "")
+        if is_weekly and pend_id == now_id and pend_tag.startswith("CB"):
+            try:
+                _anchor_w = float(r.get("brk_b_anchor_level_w", 0.0) or 0.0)
+                if _anchor_w <= 0.0:
+                    _anchor_w = float(r.get("brk_b_anchor_close_w", 0.0) or 0.0)
+                if _anchor_w <= 0.0:
+                    _anchor_w = float(r.get("brk_lvl_w", 0.0) or 0.0)
+                if _anchor_w > 0.0:
+                    r[live_px_key] = _anchor_w
+            except Exception:
+                pass
+        if pend_id == now_id and str(base_tag).strip().upper().startswith("B") and pend_tag.startswith("CB"):
+            try:
+                b_idx = max(int(r.get(b_count_key, 0) or 0), _infer_b_count_from_tag(base_tag))
+                pend_tag = f"CB{max(1, b_idx)}"
+                r[pend_tag_key] = pend_tag
+            except Exception:
+                pass
         if pend_id == now_id and pend_tag:
             r[timing_tag_key] = pend_tag
-            r[timing_ts_key] = float(r.get(pend_ts_key) or 0.0) or now_ts
+            _evt_ts = float(r.get(pend_ts_key) or 0.0) or now_ts
+            if not _is_nse_cash_session_ts(_evt_ts):
+                _evt_ts = base_ts if base_ts > 0 else _evt_ts
+            r[timing_ts_key] = _evt_ts
+            # Intraday hold visibility: show ...S while the sustain condition is true,
+            # even before finalize cutoff, so CB/CE sustained status is not missing.
+            if (not finalize) and _is_sustain_hold(base_tag, brk=brk, ema9_key=ema9_key, ema21_key=ema21_key):
+                ev_wk = _week_id(float(r.get(timing_ts_key, 0.0) or 0.0))
+                if not is_weekly:
+                    r[timing_tag_key] = f"{pend_tag}S"
+                    r[sustain_base_key] = base_tag
+                elif pend_tag.startswith("C") and ev_wk and ev_wk != now_id:
+                    # Weekly: prior-week (or older) live cross already has a closed week behind it.
+                    r[timing_tag_key] = f"{pend_tag}S"
+                    r[sustain_base_key] = base_tag
             if finalize:
                 sustained = bool((pend_tag.startswith("CB") and brk > 0 and ltp > brk) or (pend_tag.startswith("CE9CT") and str(base_tag).upper().startswith("E9CT")) or (pend_tag == f"C{TAG_ET9_WAIT_F21C}" and str(base_tag).upper() == TAG_ET9_WAIT_F21C) or (pend_tag.startswith("CE21C") and str(base_tag).upper().startswith("E21C")))
                 if sustained:
@@ -506,17 +582,61 @@ def _update_live_timing_breakout_status(
             cur_timing = str(r.get(timing_tag_key) or "")
             sustain_base = str(r.get(sustain_base_key) or "")
             if cur_timing.endswith("S") and sustain_base and sustain_base == base_tag:
+                # Normalize stale persisted CB index to current base B index.
+                if str(base_tag).strip().upper().startswith("B") and str(cur_timing).strip().upper().startswith("CB"):
+                    try:
+                        b_idx = max(int(r.get(b_count_key, 0) or 0), _infer_b_count_from_tag(base_tag))
+                        r[timing_tag_key] = f"CB{max(1, b_idx)}S"
+                    except Exception:
+                        pass
                 # Keep sustained timing tag sticky until base cycle tag changes.
                 r[timing_ts_key] = float(r.get(timing_ts_key, 0.0) or 0.0)
                 # Preserve live breakout anchor for current bucket so "% from breakout" remains visible.
                 if str(r.get(live_id_key) or "") != now_id:
-                    r[live_px_key] = float(ltp) if float(ltp or 0) > 0 else float(r.get(live_px_key, 0.0) or 0.0)
-                    r[live_id_key] = now_id
+                    if (not is_weekly) or float(r.get(live_px_key, 0.0) or 0.0) <= 0.0:
+                        r[live_px_key] = float(ltp) if float(ltp or 0) > 0 else float(r.get(live_px_key, 0.0) or 0.0)
+                        r[live_id_key] = now_id
+            elif _is_sustain_hold(base_tag, brk=brk, ema9_key=ema9_key, ema21_key=ema21_key):
+                if is_weekly and not finalize:
+                    # Weekly pre-finalize:
+                    # - intraday cross *this* ISO week => CB* without S until Friday finalize
+                    # - timing event from a *prior* week + still above brk => CB*S (Apr 10 → later weeks)
+                    _base_c = _c_tag(base_tag, max(1, int(r.get(cb_count_key, 0) or 1)))
+                    ts_week = _week_id(float(r.get(timing_ts_key, 0.0) or 0.0))
+                    _e_promo = _allow_passive_hold_promote(base_tag)
+                    _b_like = str(base_tag).strip().upper().startswith("B") or str(
+                        base_tag
+                    ).strip().upper().startswith("RST")
+                    if _e_promo:
+                        if ts_week and ts_week != now_id and str(cur_timing).startswith("C"):
+                            r[timing_tag_key] = f"{_base_c}S"
+                            r[sustain_base_key] = base_tag
+                        else:
+                            r[timing_tag_key] = _base_c
+                        r[timing_ts_key] = float(r.get(timing_ts_key, 0.0) or 0.0) or now_ts
+                    elif _b_like and str(cur_timing).startswith("C"):
+                        if ts_week and ts_week != now_id:
+                            r[timing_tag_key] = f"{_base_c}S"
+                            r[sustain_base_key] = base_tag
+                        else:
+                            r[timing_tag_key] = _base_c
+                        r[timing_ts_key] = float(r.get(timing_ts_key, 0.0) or 0.0) or now_ts
+                    else:
+                        r[timing_tag_key] = _base_c if str(cur_timing).startswith("C") else cur_timing
+                        r[timing_ts_key] = float(r.get(timing_ts_key, 0.0) or 0.0) or now_ts
+                else:
+                    # Auto-express sustained hold with C...S in timing layer.
+                    r[timing_tag_key] = f"{_c_tag(base_tag, max(1, int(r.get(cb_count_key, 0) or 1)))}S"
+                    r[sustain_base_key] = base_tag
+                    r[timing_ts_key] = float(r.get(timing_ts_key, 0.0) or 0.0) or now_ts
             else:
-                r[timing_tag_key] = base_tag
-                r[timing_ts_key] = base_ts
-                r[sustain_base_key] = ""
-                r[live_px_key], r[live_id_key] = 0.0, ""
+                # Without a usable quote / breakout level, do not tear down timing state
+                # (SHM gap or cold row looks like "not sustained" and used to flash CB* then B*).
+                if ltp > 0.0 and brk > 0.0:
+                    r[timing_tag_key] = base_tag
+                    r[timing_ts_key] = base_ts
+                    r[sustain_base_key] = ""
+                    r[live_px_key], r[live_id_key] = 0.0, ""
 
         r[prev_id_key] = now_id
         r[prev_ltp_key] = float(ltp) if ltp > 0 else 0.0
@@ -606,6 +726,7 @@ def _update_minimal_cycle_state(
         st_state = 0; st_below21 = 0; st_b = 0; st_e9t = 0; st_e21c = 0; st_rst = 0; st_last_tag = "—"; st_last_ts = 0.0
         st_last_don_c: float | None = None
         st_b_anchor_close = 0.0
+        st_b_anchor_level = 0.0
         st_b_anchor_ts = 0.0
         try:
             dlen = max(2, int(don_len))
@@ -640,6 +761,7 @@ def _update_minimal_cycle_state(
                         st_last_tag = _tag_power_e9ct(st_last_tag)
                     st_last_ts = float(hv[j][0])
                     st_b_anchor_close = c
+                    st_b_anchor_level = float(st_last_don_c or 0.0)
                     st_b_anchor_ts = float(hv[j][0])
                 elif st_state > 0:
                     # Pine's layout: first an if/elif for state==1 transitions, then a SEPARATE
@@ -678,6 +800,7 @@ def _update_minimal_cycle_state(
         r["last_event_ts"] = st_last_ts
         r["cycle_last_bar_key"] = bar_key
         r["brk_b_anchor_close"] = float(st_b_anchor_close) if st_b_anchor_close > 0 else 0.0
+        r["brk_b_anchor_level"] = float(st_b_anchor_level) if st_b_anchor_level > 0 else 0.0
         r["brk_b_anchor_ts"] = float(st_b_anchor_ts) if st_b_anchor_close > 0 else 0.0
         if st_last_don_c is not None:
             r["brk_lvl"] = st_last_don_c
@@ -685,9 +808,10 @@ def _update_minimal_cycle_state(
 
     if str(r.get("cycle_last_bar_key") or "") == bar_key:
         _anc0 = float(r.get("brk_b_anchor_close", 0.0) or 0.0)
+        _alv0 = float(r.get("brk_b_anchor_level", 0.0) or 0.0)
         _lt0 = str(r.get("last_tag") or "")
         if (
-            _anc0 <= 0.0
+            (_anc0 <= 0.0 or _alv0 <= 0.0)
             and int(r.get("b_count", 0) or 0) > 0
             and _lt0.startswith("B")
         ):
@@ -721,6 +845,7 @@ def _update_minimal_cycle_state(
         rst_count += 1
         state = 0; b_count = 0; e9t_count = 0; e21c_count = 0; last_tag = "RST"
         r["brk_b_anchor_close"] = 0.0
+        r["brk_b_anchor_level"] = 0.0
         r["brk_b_anchor_ts"] = 0.0
     elif breakout:
         state = 1
@@ -730,6 +855,7 @@ def _update_minimal_cycle_state(
             # Pine "Power Bar": breakout and EMA9 test same candle.
             last_tag = _tag_power_e9ct(last_tag)
         r["brk_b_anchor_close"] = close
+        r["brk_b_anchor_level"] = float(don_curr) if "don_curr" in locals() else 0.0
         r["brk_b_anchor_ts"] = ts
     elif state > 0:
         # Pine's layout: state==1 transitions via if/elif, then a separate
@@ -876,6 +1002,7 @@ def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: 
         "cycle_last_bar_key": "",
         "brk_lvl": r.get("brk_lvl_w"),
         "brk_b_anchor_close": 0.0,
+        "brk_b_anchor_level": 0.0,
         "brk_b_anchor_ts": 0.0,
     }
     _update_minimal_cycle_state(tmp, w_run, don_len=don_len, weekly=True)
@@ -894,6 +1021,7 @@ def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: 
     if tmp.get("brk_lvl") is not None:
         r["brk_lvl_w"] = tmp.get("brk_lvl")
     r["brk_b_anchor_close_w"] = float(tmp.get("brk_b_anchor_close", 0) or 0)
+    r["brk_b_anchor_level_w"] = float(tmp.get("brk_b_anchor_level", 0) or 0)
     r["brk_b_anchor_ts_w"] = float(tmp.get("brk_b_anchor_ts", 0) or 0)
     r["_wcycle_v"] = WEEKLY_CYCLE_PARITY_VERSION
 
@@ -1834,6 +1962,20 @@ def _fmt_last_event_ist(ts_raw) -> str:
         return "—"
 
 
+def _is_nse_cash_session_ts(ts_raw) -> bool:
+    try:
+        t = float(ts_raw or 0.0)
+        if t <= 0.0:
+            return False
+        d = datetime.fromtimestamp(t, tz=_IST)
+        if d.weekday() >= 5:
+            return False
+        hm = (d.hour, d.minute)
+        return (9, 15) <= hm <= (15, 30)
+    except Exception:
+        return False
+
+
 def compute_breakout_setup_score_row(d: dict) -> int:
     """
     0–100 heuristic rank for /breakout sorting (tape + cycle context).
@@ -1980,10 +2122,22 @@ def format_ui_row(d):
         mfv = float(_mr)
         mrsi_ui = f"{mfv:.2f}" + ("*" if _mrl else "")
         mrsi_color = "#00FF00" if mfv < 2.0 else ("#FFB000" if mfv < 5.0 else "#D1D1D1")
-    _ttd = str(d.get("timing_last_tag") or d.get("last_tag") or "—")
-    _ttw = str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "—")
-    _ttd_ts = float(d.get("timing_last_event_ts", d.get("last_event_ts", 0.0)) or 0.0)
-    _ttw_ts = float(d.get("timing_last_event_ts_w", d.get("last_event_ts_w", 0.0)) or 0.0)
+    _raw_timing_d = d.get("timing_last_tag")
+    _raw_timing_w = d.get("timing_last_tag_w")
+    _ttd = str(_raw_timing_d or d.get("last_tag") or "—")
+    _ttw = str(_raw_timing_w or d.get("last_tag_w") or "—")
+    _ttd_ts = float(d.get("timing_last_event_ts", 0.0) or 0.0)
+    if _ttd_ts <= 0.0:
+        if _raw_timing_d and str(_raw_timing_d).strip().upper().startswith("C"):
+            _ttd_ts = 0.0
+        else:
+            _ttd_ts = float(d.get("last_event_ts", 0.0) or 0.0)
+    _ttw_ts = float(d.get("timing_last_event_ts_w", 0.0) or 0.0)
+    if _ttw_ts <= 0.0:
+        if _raw_timing_w and str(_raw_timing_w).strip().upper().startswith("C"):
+            _ttw_ts = 0.0
+        else:
+            _ttw_ts = float(d.get("last_event_ts_w", 0.0) or 0.0)
     d_pending = bool(str(d.get("cb_pending_day_d") or "").strip())
     w_pending = bool(str(d.get("cb_pending_week_w") or "").strip())
     # Query-time fallback rows may not carry full cycle pending fields; keep CB as live in that case.
@@ -2039,6 +2193,11 @@ def format_ui_row(d):
     brk_move_live_ui = "—"
     brk_move_live_color = "#666666"
     _live_px_d = float(d.get("cb_live_entry_px_d", 0.0) or 0.0)
+    _anch_d = float(d.get("brk_b_anchor_level", 0.0) or 0.0)
+    if _anch_d <= 0.0:
+        _anch_d = float(d.get("brk_lvl", 0.0) or 0.0)
+    if _anch_d > 0.0:
+        _live_px_d = _anch_d
     try:
         if _live_px_d > 0 and _ltp_num > 0:
             _lmd = ((_ltp_num / _live_px_d) - 1.0) * 100.0
@@ -2055,6 +2214,11 @@ def format_ui_row(d):
     brk_move_live_ui_w = "—"
     brk_move_live_color_w = "#666666"
     _live_px_w = float(d.get("cb_live_entry_px_w", 0.0) or 0.0)
+    _anch_w = float(d.get("brk_b_anchor_level_w", 0.0) or 0.0)
+    if _anch_w <= 0.0:
+        _anch_w = float(d.get("brk_lvl_w", 0.0) or 0.0)
+    if _anch_w > 0.0:
+        _live_px_w = _anch_w
     try:
         if _live_px_w > 0 and _ltp_num > 0:
             _lmw = ((_ltp_num / _live_px_w) - 1.0) * 100.0

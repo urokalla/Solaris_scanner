@@ -3,7 +3,7 @@ import threading
 from backend.breakout_engine import BreakoutScanner
 from .engine import get_scanner
 
-breakout_instance = None
+breakout_instances: dict[str, BreakoutScanner] = {}
 breakout_lock = threading.Lock()
 
 
@@ -20,21 +20,23 @@ def _dashboard_runs_loop() -> bool:
     return os.getenv("DASHBOARD_BREAKOUT_LOOP", "1").strip().lower() not in ("0", "false", "no")
 
 
-def get_breakout_scanner(symbols=None, universe=None):
-    global breakout_instance
+def get_breakout_scanner(symbols=None, universe=None, role: str = "strategy"):
+    role_key = "timing" if str(role or "").strip().lower() == "timing" else "strategy"
     with breakout_lock:
-        if breakout_instance is None:
+        inst = breakout_instances.get(role_key)
+        if inst is None:
             get_scanner()
             u = universe if universe is not None else "Nifty 500"
-            breakout_instance = BreakoutScanner(symbols=symbols, universe=u)
-            if _dashboard_runs_loop():
-                print("📡 [Sidecar] Initializing Breakout Engine (running main loop in dashboard)...")
-                breakout_instance.start_scanning()
+            inst = BreakoutScanner(symbols=symbols, universe=u)
+            breakout_instances[role_key] = inst
+            # Isolation: only strategy instance runs the heavy loop in dashboard mode.
+            if role_key == "strategy" and _dashboard_runs_loop():
+                print("📡 [Sidecar] Initializing Breakout Engine (strategy loop in dashboard)...")
+                inst.start_scanning()
             else:
-                # Loop is owned by the sidecar container; the dashboard's BreakoutScanner only
-                # serves `get_ui_view` (lazy hydration + SHM refresh). Saves ~60% dashboard CPU.
+                # Timing/sidecar lazy mode: isolated instance serving `get_ui_view` only.
                 print(
-                    "📡 [Sidecar] Initializing Breakout Engine (lazy mode — loop delegated to "
-                    "sidecar container; set DASHBOARD_BREAKOUT_LOOP=1 to run it here instead)..."
+                    "📡 [Sidecar] Initializing Breakout Engine "
+                    f"({role_key} lazy mode — loop delegated to sidecar container)..."
                 )
-        return breakout_instance
+        return inst

@@ -23,7 +23,7 @@ def download_excel_handler(self):
     Export all rows matching current filters/sort — not only the visible page.
     Slim columns only (avoids huge DataFrames / odd types from full result dicts).
     """
-    scanner = get_breakout_scanner(universe=self.universe)
+    scanner = get_breakout_scanner(universe=self.universe, role="timing")
     # Same universe row set as the live grid; singleton scanner ignores `universe=` once created.
     scanner.update_universe(self.universe, None)
     view = scanner.get_ui_view(
@@ -106,9 +106,9 @@ def download_excel_handler(self):
 
 def download_timing_excel_handler(self):
     """
-    Export /breakout-timing rows (timing tags, WHEN IST, % from B, state) with current filters/sort.
+    Export /breakout-timing rows (timing tags, WHEN IST, SINCE BRK %) with current filters/sort.
     """
-    scanner = get_breakout_scanner(universe=self.universe)
+    scanner = get_breakout_scanner(universe=self.universe, role="timing")
     scanner.update_universe(self.universe, None)
     view = scanner.get_ui_view(
         page=1,
@@ -142,12 +142,10 @@ def download_timing_excel_handler(self):
                 "mrs_w": r.get("mrs_weekly"),
                 "last_tag_d": r.get("timing_last_tag"),
                 "when_d_ist": r.get("timing_last_event_dt"),
-                "pct_from_b_d": r.get("brk_move_pct"),
                 "pct_live_d": r.get("brk_move_live_pct"),
                 "b_bar_d_ist": r.get("brk_b_anchor_dt"),
                 "last_tag_w": r.get("timing_last_tag_w"),
                 "when_w_ist": r.get("timing_last_event_dt_w"),
-                "pct_from_b_w": r.get("brk_move_pct_w"),
                 "pct_live_w": r.get("brk_move_live_pct_w"),
                 "b_bar_w_ist": r.get("brk_b_anchor_dt_w"),
             }
@@ -163,12 +161,10 @@ def download_timing_excel_handler(self):
         "W_MRS",
         "LAST_TAG_D",
         "WHEN_D_IST",
-        "PCT_FROM_B_D",
         "SINCE BRK % (D)",
         "B_BAR_DATE_D_IST",
         "LAST_TAG_W",
         "WHEN_W_IST",
-        "PCT_FROM_B_W",
         "SINCE BRK % (W)",
         "B_BAR_DATE_W_IST",
     ]
