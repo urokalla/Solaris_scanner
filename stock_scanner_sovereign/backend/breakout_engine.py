@@ -845,8 +845,14 @@ class BreakoutScanner:
             except Exception:
                 pass
             try:
+                _lw_rst_cb = (
+                    str(raw.get("last_tag_w") or "").strip().upper() == "RST"
+                    and str(raw.get("timing_last_tag_w") or "").strip().upper().startswith("CB")
+                )
                 aw = float(raw.get("brk_b_anchor_level_w", 0.0) or 0.0)
-                if aw <= 0.0:
+                if _lw_rst_cb:
+                    aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
+                elif aw <= 0.0:
                     aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
                 data[i]["brk_move_live_pct_w"] = f"{((ltp / aw) - 1.0) * 100.0:+.2f}%" if aw > 0.0 else "—"
             except Exception:

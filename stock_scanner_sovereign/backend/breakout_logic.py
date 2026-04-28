@@ -459,19 +459,26 @@ def _update_live_timing_breakout_status(
         pend_tag = str(r.get(pend_tag_key) or "")
         sustain_base = str(r.get(sustain_base_key) or "")
         cur_timing = str(r.get(timing_tag_key) or "")
+        _struct_last = str(r.get(last_tag_key) or "").strip().upper()
         # Weekly anchor healing: if CB weekly tag exists but live entry was overwritten to current LTP,
         # restore to fixed weekly breakout anchor (keeps SINCE BRK % meaningful globally).
         if is_weekly and cur_timing.startswith("CB"):
-            try:
-                _anchor_w = float(r.get("brk_b_anchor_level_w", 0.0) or 0.0)
-                if _anchor_w <= 0.0:
-                    _anchor_w = float(r.get("brk_b_anchor_close_w", 0.0) or 0.0)
-                if _anchor_w <= 0.0:
-                    _anchor_w = float(r.get("brk_lvl_w", 0.0) or 0.0)
-                if _anchor_w > 0.0:
-                    r[live_px_key] = _anchor_w
-            except Exception:
-                pass
+            # Weekly cycle can still read RST while timing already shows CB* (live cross before the
+            # next confirmed weekly bar prints B1). Do not copy pre‑RST brk_b_anchor_level_w into
+            # live_px — it inflates SINCE BRK % (e.g. JBMA ~1032 vs ~645 LTP).
+            if _struct_last == "RST" and brk > 0.0:
+                r[live_px_key], r[live_id_key] = float(brk), now_id
+            else:
+                try:
+                    _anchor_w = float(r.get("brk_b_anchor_level_w", 0.0) or 0.0)
+                    if _anchor_w <= 0.0:
+                        _anchor_w = float(r.get("brk_b_anchor_close_w", 0.0) or 0.0)
+                    if _anchor_w <= 0.0:
+                        _anchor_w = float(r.get("brk_lvl_w", 0.0) or 0.0)
+                    if _anchor_w > 0.0:
+                        r[live_px_key] = _anchor_w
+                except Exception:
+                    pass
         def _week_id(ts_val: float) -> str:
             try:
                 t = float(ts_val or 0.0)
@@ -518,21 +525,29 @@ def _update_live_timing_breakout_status(
             # Donchian crossing event: keep CB* for B/RST families, map E* to CE*.
             ctag = _c_tag(base_tag, cb_idx)
             r[pend_id_key], r[pend_tag_key], r[pend_ts_key], r[pend_prev_key] = now_id, ctag, cross_ts, str(r.get(timing_tag_key) or base_tag)
-            r[live_px_key], r[live_id_key] = float(ltp), now_id
+            # Weekly live "since brk" anchor: use Donchian line at cross when still structurally RST.
+            if is_weekly and str(base_tag).strip().upper() == "RST" and brk > 0.0:
+                r[live_px_key], r[live_id_key] = float(brk), now_id
+            else:
+                r[live_px_key], r[live_id_key] = float(ltp), now_id
 
         pend_id = str(r.get(pend_id_key) or "")
         pend_tag = str(r.get(pend_tag_key) or "")
         if is_weekly and pend_id == now_id and pend_tag.startswith("CB"):
-            try:
-                _anchor_w = float(r.get("brk_b_anchor_level_w", 0.0) or 0.0)
-                if _anchor_w <= 0.0:
-                    _anchor_w = float(r.get("brk_b_anchor_close_w", 0.0) or 0.0)
-                if _anchor_w <= 0.0:
-                    _anchor_w = float(r.get("brk_lvl_w", 0.0) or 0.0)
-                if _anchor_w > 0.0:
-                    r[live_px_key] = _anchor_w
-            except Exception:
-                pass
+            _sl2 = str(r.get(last_tag_key) or "").strip().upper()
+            if _sl2 == "RST" and brk > 0.0:
+                r[live_px_key], r[live_id_key] = float(brk), now_id
+            else:
+                try:
+                    _anchor_w = float(r.get("brk_b_anchor_level_w", 0.0) or 0.0)
+                    if _anchor_w <= 0.0:
+                        _anchor_w = float(r.get("brk_b_anchor_close_w", 0.0) or 0.0)
+                    if _anchor_w <= 0.0:
+                        _anchor_w = float(r.get("brk_lvl_w", 0.0) or 0.0)
+                    if _anchor_w > 0.0:
+                        r[live_px_key] = _anchor_w
+                except Exception:
+                    pass
         if pend_id == now_id and str(base_tag).strip().upper().startswith("B") and pend_tag.startswith("CB"):
             try:
                 b_idx = max(int(r.get(b_count_key, 0) or 0), _infer_b_count_from_tag(base_tag))
@@ -2214,8 +2229,14 @@ def format_ui_row(d):
     brk_move_live_ui_w = "—"
     brk_move_live_color_w = "#666666"
     _live_px_w = float(d.get("cb_live_entry_px_w", 0.0) or 0.0)
+    _lw_rst_cb = (
+        str(d.get("last_tag_w") or "").strip().upper() == "RST"
+        and str(d.get("timing_last_tag_w") or "").strip().upper().startswith("CB")
+    )
     _anch_w = float(d.get("brk_b_anchor_level_w", 0.0) or 0.0)
-    if _anch_w <= 0.0:
+    if _lw_rst_cb:
+        _anch_w = float(d.get("brk_lvl_w", 0.0) or 0.0)
+    elif _anch_w <= 0.0:
         _anch_w = float(d.get("brk_lvl_w", 0.0) or 0.0)
     if _anch_w > 0.0:
         _live_px_w = _anch_w
