@@ -280,7 +280,11 @@ def breakout_data_grid():
                     padding_y="0",
                 ),
                 rx.table.cell(
-                    rx.text(r.get("mrs_weekly", "—"), color=r.get("mrs_color", "#D1D1D1")),
+                    rx.text(
+                        r.get("mrs_weekly", "—"),
+                        color=r.get("mrs_color", "#D1D1D1"),
+                        title=r.get("wmrs_debug", ""),
+                    ),
                     font_size="12px",
                     padding_y="0",
                 ),

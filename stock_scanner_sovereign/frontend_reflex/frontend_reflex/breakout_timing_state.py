@@ -2,6 +2,7 @@ import reflex as rx
 
 from .breakout_engine_manager import get_breakout_scanner
 from .breakout_timing_tasks import poll_breakout_timing_handler
+from .breakout_handlers import download_timing_excel_handler
 from .state import State
 
 
@@ -17,12 +18,16 @@ class BreakoutTimingState(rx.State):
     page_size: int = 100
     filter_brk_stage: str = "ALL"
     filter_mrs_grid: str = "ALL"
+    filter_wmrs_slope: str = "ALL"
     filter_m_rsi2: str = "ALL"
     filter_profile: str = "ALL"
     status_message: str = "Offline"
     last_sync: str = "-"
     sort_timing_key: str = "last_ts"
     sort_timing_desc: bool = True
+    last_non_empty_signature: str = ""
+    last_non_empty_results: list[dict] = []
+
     @rx.var
     def total_pages(self) -> int:
         ps = max(1, int(self.page_size))
@@ -52,6 +57,72 @@ class BreakoutTimingState(rx.State):
             return ""
         return "▼" if self.sort_timing_desc else "▲"
 
+    @rx.var
+    def symbol_sort_arrow(self) -> str:
+        if self.sort_timing_key != "symbol":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def ltp_sort_arrow(self) -> str:
+        if self.sort_timing_key != "ltp":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def chp_sort_arrow(self) -> str:
+        if self.sort_timing_key != "chp":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def rvol_sort_arrow(self) -> str:
+        if self.sort_timing_key != "rv":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def wmrs_sort_arrow(self) -> str:
+        if self.sort_timing_key != "wmrs":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def last_tag_d_sort_arrow(self) -> str:
+        if self.sort_timing_key != "last_tag_d":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def last_tag_w_sort_arrow(self) -> str:
+        if self.sort_timing_key != "last_tag_w":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def pct_from_b_d_sort_arrow(self) -> str:
+        if self.sort_timing_key != "pct_from_b_d":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def pct_live_d_sort_arrow(self) -> str:
+        if self.sort_timing_key != "pct_live_d":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def pct_from_b_w_sort_arrow(self) -> str:
+        if self.sort_timing_key != "pct_from_b_w":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
+    @rx.var
+    def pct_live_w_sort_arrow(self) -> str:
+        if self.sort_timing_key != "pct_live_w":
+            return ""
+        return "▼" if self.sort_timing_desc else "▲"
+
     async def on_load(self):
         main = await self.get_state(State)
         u = main.universe
@@ -63,9 +134,6 @@ class BreakoutTimingState(rx.State):
 
     def set_universe(self, u: str):
         self.universe, self.current_page = u, 1
-        # Clear any symbol filter carried over from the previous universe so switching
-        # (e.g. Nifty 500 → Nifty 50) doesn't leave the grid stuck on a symbol that no
-        # longer exists in the new universe.
         self.search_query = ""
         get_breakout_scanner(universe=u).update_universe(u, None)
 
@@ -83,6 +151,9 @@ class BreakoutTimingState(rx.State):
 
     def set_filter_mrs_grid(self, v: str):
         self.filter_mrs_grid, self.current_page = (v or "ALL").strip().upper(), 1
+
+    def set_filter_wmrs_slope(self, v: str):
+        self.filter_wmrs_slope, self.current_page = (v or "ALL").strip().upper(), 1
 
     def set_filter_m_rsi2(self, v: str):
         self.filter_m_rsi2, self.current_page = (v or "ALL"), 1
@@ -119,6 +190,94 @@ class BreakoutTimingState(rx.State):
             self.sort_timing_desc = True
         self.current_page = 1
 
+    def toggle_sort_symbol(self):
+        if self.sort_timing_key == "symbol":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "symbol"
+            self.sort_timing_desc = False
+        self.current_page = 1
+
+    def toggle_sort_ltp(self):
+        if self.sort_timing_key == "ltp":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "ltp"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_chp(self):
+        if self.sort_timing_key == "chp":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "chp"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_rvol(self):
+        if self.sort_timing_key == "rv":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "rv"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_wmrs(self):
+        if self.sort_timing_key == "wmrs":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "wmrs"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_last_tag_d(self):
+        if self.sort_timing_key == "last_tag_d":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "last_tag_d"
+            self.sort_timing_desc = False
+        self.current_page = 1
+
+    def toggle_sort_last_tag_w(self):
+        if self.sort_timing_key == "last_tag_w":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "last_tag_w"
+            self.sort_timing_desc = False
+        self.current_page = 1
+
+    def toggle_sort_pct_from_b_d(self):
+        if self.sort_timing_key == "pct_from_b_d":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "pct_from_b_d"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_pct_live_d(self):
+        if self.sort_timing_key == "pct_live_d":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "pct_live_d"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_pct_from_b_w(self):
+        if self.sort_timing_key == "pct_from_b_w":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "pct_from_b_w"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
+    def toggle_sort_pct_live_w(self):
+        if self.sort_timing_key == "pct_live_w":
+            self.sort_timing_desc = not self.sort_timing_desc
+        else:
+            self.sort_timing_key = "pct_live_w"
+            self.sort_timing_desc = True
+        self.current_page = 1
+
     def next_page(self):
         self.current_page = min(self.total_pages, self.current_page + 1)
 
@@ -144,6 +303,9 @@ class BreakoutTimingState(rx.State):
         }
         tv_sym = idx_alias.get(base, base)
         return rx.redirect(f"https://www.tradingview.com/chart/?symbol=NSE:{tv_sym}", is_external=True)
+
+    def download_excel(self):
+        return download_timing_excel_handler(self)
 
     @rx.event(background=True)
     async def poll_timing(self):

@@ -5,7 +5,17 @@ from ..breakout_timing_state import BreakoutTimingState
 
 def breakout_timing_data_grid():
     header_row = rx.table.row(
-        rx.table.column_header_cell(rx.text("SYMBOL", color="white"), color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("SYMBOL", color="white"),
+                rx.text(BreakoutTimingState.symbol_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_symbol,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(
             rx.hstack(
                 rx.text("SCORE", color="white"),
@@ -17,8 +27,28 @@ def breakout_timing_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("PRICE", color="white"), color="white"),
-        rx.table.column_header_cell(rx.text("CHG%", color="white"), color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("PRICE", color="white"),
+                rx.text(BreakoutTimingState.ltp_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_ltp,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("CHG%", color="white"),
+                rx.text(BreakoutTimingState.chp_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_chp,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(
             rx.hstack(
                 rx.text("RS", color="white"),
@@ -30,9 +60,39 @@ def breakout_timing_data_grid():
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("RVOL", color="white"), color="white"),
-        rx.table.column_header_cell(rx.text("W_MRS", color="white"), color="white"),
-        rx.table.column_header_cell(rx.text("LAST TAG D", color="white"), color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("RVOL", color="white"),
+                rx.text(BreakoutTimingState.rvol_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_rvol,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("W_MRS", color="white"),
+                rx.text(BreakoutTimingState.wmrs_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_wmrs,
+            ),
+            color="white",
+        ),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("LAST TAG D", color="white"),
+                rx.text(BreakoutTimingState.last_tag_d_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_last_tag_d,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(
             rx.hstack(
                 rx.text("WHEN (D) IST", color="white"),
@@ -46,14 +106,38 @@ def breakout_timing_data_grid():
         ),
         rx.table.column_header_cell(
             rx.vstack(
-                rx.text("% FROM B (D)", color="white", font_size="11px"),
-                rx.text("close → LTP", color="#888888", font_size="9px"),
+                rx.hstack(
+                    rx.text("% FROM B (D)", color="white", font_size="11px"),
+                    rx.text(BreakoutTimingState.pct_from_b_d_sort_arrow, color="#00E5FF", font_size="10px"),
+                    spacing="1",
+                    align_items="center",
+                    cursor="pointer",
+                    on_click=BreakoutTimingState.toggle_sort_pct_from_b_d,
+                ),
+                rx.hstack(
+                    rx.text("SINCE BRK % (D)", color="#00E5FF", font_size="10px"),
+                    rx.text(BreakoutTimingState.pct_live_d_sort_arrow, color="#00E5FF", font_size="10px"),
+                    spacing="1",
+                    align_items="center",
+                    cursor="pointer",
+                    on_click=BreakoutTimingState.toggle_sort_pct_live_d,
+                ),
                 spacing="0",
                 align_items="start",
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("LAST TAG W", color="white"), color="white"),
+        rx.table.column_header_cell(
+            rx.hstack(
+                rx.text("LAST TAG W", color="white"),
+                rx.text(BreakoutTimingState.last_tag_w_sort_arrow, color="#00E5FF", font_size="10px"),
+                spacing="1",
+                align_items="center",
+                cursor="pointer",
+                on_click=BreakoutTimingState.toggle_sort_last_tag_w,
+            ),
+            color="white",
+        ),
         rx.table.column_header_cell(
             rx.hstack(
                 rx.text("WHEN (W) IST", color="white"),
@@ -67,15 +151,27 @@ def breakout_timing_data_grid():
         ),
         rx.table.column_header_cell(
             rx.vstack(
-                rx.text("% FROM B (W)", color="white", font_size="11px"),
-                rx.text("close → LTP", color="#888888", font_size="9px"),
+                rx.hstack(
+                    rx.text("% FROM B (W)", color="white", font_size="11px"),
+                    rx.text(BreakoutTimingState.pct_from_b_w_sort_arrow, color="#00E5FF", font_size="10px"),
+                    spacing="1",
+                    align_items="center",
+                    cursor="pointer",
+                    on_click=BreakoutTimingState.toggle_sort_pct_from_b_w,
+                ),
+                rx.hstack(
+                    rx.text("SINCE BRK % (W)", color="#00E5FF", font_size="10px"),
+                    rx.text(BreakoutTimingState.pct_live_w_sort_arrow, color="#00E5FF", font_size="10px"),
+                    spacing="1",
+                    align_items="center",
+                    cursor="pointer",
+                    on_click=BreakoutTimingState.toggle_sort_pct_live_w,
+                ),
                 spacing="0",
                 align_items="start",
             ),
             color="white",
         ),
-        rx.table.column_header_cell(rx.text("STATE D / W", color="white"), color="white"),
-        rx.table.column_header_cell(rx.text("AGE D / W", color="white"), color="white"),
     )
     body = rx.table.body(
         rx.foreach(
@@ -143,6 +239,12 @@ def breakout_timing_data_grid():
                             color="#888888",
                             font_size="9px",
                         ),
+                        rx.text(
+                            r.get("brk_move_live_pct", "—"),
+                            color=r.get("brk_move_live_color", "#666666"),
+                            font_weight="bold",
+                            font_size="10px",
+                        ),
                         spacing="0",
                         align_items="start",
                     ),
@@ -170,34 +272,18 @@ def breakout_timing_data_grid():
                             color="#888888",
                             font_size="9px",
                         ),
-                        spacing="0",
-                        align_items="start",
-                    ),
-                    padding_y="0",
-                ),
-                rx.table.cell(
-                    rx.vstack(
                         rx.text(
-                            f"{r.get('timing_state_name', '—')} / {r.get('timing_state_name_w', '—')}",
-                            color="#D1D1D1",
+                            r.get("brk_move_live_pct_w", "—"),
+                            color=r.get("brk_move_live_color_w", "#666666"),
+                            font_weight="bold",
                             font_size="10px",
                         ),
-                        rx.text(
-                            r.get("post_rst_hint_dw", ""),
-                            color="#FFB000",
-                            font_size="9px",
-                            font_weight="bold",
-                        ),
                         spacing="0",
                         align_items="start",
                     ),
                     padding_y="0",
                 ),
-                rx.table.cell(
-                    rx.text(f"{r.get('timing_age_mins', '—')} / {r.get('timing_age_mins_w', '—')}", color="#888888", font_size="10px"),
-                    padding_y="0",
-                ),
-                height="26px",
+                height="34px",
                 padding="0",
                 border_bottom="1px solid #1f1f1f",
                 _odd={"background_color": "#050505"},

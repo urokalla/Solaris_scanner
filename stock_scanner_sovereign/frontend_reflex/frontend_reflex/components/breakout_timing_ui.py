@@ -45,7 +45,7 @@ def breakout_timing_header():
 
 def breakout_timing_sidebar():
     profile_opts = ["ALL", "ELITE", "LEADER", "RISING", "LAGGARD", "FADING", "BASELINE"]
-    timing_opts = ["ALL", "ANY_BRK", "D_BRK", "W_BRK"]
+    timing_opts = ["ALL", "LIVE", "SUSTAINED", "SUSTAINED_W", "NOT_SUSTAINED", "E_TIMING", "E_SUSTAINED", "ANY_BRK", "D_BRK", "W_BRK"]
     brk_options = [
         "ALL",
         "LOCKED",
@@ -58,6 +58,7 @@ def breakout_timing_sidebar():
         "RST",
     ]
     mrs_grid_options = ["ALL", "TREND_OK"]
+    wmrs_slope_options = ["ALL", "POS"]
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
         rx.box(
@@ -94,6 +95,14 @@ def breakout_timing_sidebar():
             margin_left="15px",
             margin_right="15px",
             height="32px",
+        ),
+        rx.text(
+            "LIVE = pending daily C* above brk. SUSTAINED = daily C*S today / live hold. "
+            "SUSTAINED_W = weekly C*S today / live weekly hold. "
+            "E_TIMING = E-family cycle/timing view. E_SUSTAINED = explicit CE*S tags.",
+            size="1",
+            color="#666666",
+            padding="4px 15px 0 15px",
         ),
         rx.text("Same filters as Breakout grid", size="1", color="#888888", padding="10px 15px 4px 15px"),
         rx.text("Symbol contains", size="1", color="#888888", padding_left="15px"),
@@ -167,9 +176,40 @@ def breakout_timing_sidebar():
             margin_right="15px",
             height="32px",
         ),
+        rx.text("W_MRS SLOPE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.select(
+            wmrs_slope_options,
+            value=BreakoutTimingState.filter_wmrs_slope,
+            on_change=BreakoutTimingState.set_filter_wmrs_slope,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
         rx.text("LAST TAG PREFIX", size="1", color="#888888", padding_top="8px", padding_left="15px"),
         rx.select(
-            ["ALL", "B", "E9CT", "ET9DNWF21C", "E21C", "RST"],
+            [
+                "ALL",
+                "B",
+                "E9CT",
+                "E9CT1",
+                "E9CT2",
+                "E9CT3",
+                "E9CT4",
+                "E9CT5",
+                "E9CT6",
+                "E9CT7",
+                "E9CT8",
+                "E9CT9",
+                "ET9DNWF21C",
+                "E21C",
+                "RST",
+            ],
             value=BreakoutTimingState.filter_m_rsi2,
             on_change=BreakoutTimingState.set_filter_m_rsi2,
             color="white",
@@ -182,8 +222,24 @@ def breakout_timing_sidebar():
             margin_right="15px",
             height="32px",
         ),
+        rx.button(
+            "EXPORT XLSX",
+            on_click=BreakoutTimingState.download_excel,
+            size="1",
+            margin_left="15px",
+            margin_right="15px",
+            margin_top="10px",
+            width="calc(100% - 30px)",
+            bg="#00E5FF",
+            color="black",
+            font_weight="bold",
+            _hover={"bg": "#00B8CC"},
+        ),
         width="100%",
         height="100%",
         border_right="1px solid #333333",
         background_color="#000000",
+        overflow_y="auto",
+        flex="1",
+        min_height="0",
     )

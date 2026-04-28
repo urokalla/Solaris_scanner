@@ -21,7 +21,8 @@ def breakout_timing_page():
                 rx.box(
                     rx.text(
                         f"LAST SYNC: {BreakoutTimingState.last_sync} | STATUS: {BreakoutTimingState.status_message} | "
-                        "WHEN = bar timestamp (IST) for the last daily / weekly cycle tag update.",
+                        "% FROM B = B-bar close → LTP; SINCE BRK % = LTP at first brk cross today/week → LTP. "
+                        "WHEN = bar timestamp (IST) for last cycle tag update.",
                         size="1",
                         color="#00FF00",
                     ),

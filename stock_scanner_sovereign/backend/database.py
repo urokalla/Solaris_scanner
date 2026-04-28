@@ -263,6 +263,34 @@ class DatabaseManager:
             logger.warning("Database: get_brk_lvl_map failed: %s", e)
             return {}
 
+    def get_live_last_price_map(self, symbols):
+        """
+        Return {symbol: last_price} from live_state for scanner warm-start hydration.
+        Useful when parquet is stale and scanner restarts after session close.
+        """
+        if not symbols:
+            return {}
+        self.ensure_live_state_table()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT symbol, last_price FROM live_state WHERE symbol IN %s AND last_price IS NOT NULL",
+                        (tuple(symbols),),
+                    )
+                    out = {}
+                    for sym, lp in cur.fetchall():
+                        try:
+                            v = float(lp)
+                        except (TypeError, ValueError):
+                            continue
+                        if np.isfinite(v) and v > 0:
+                            out[sym] = v
+                    return out
+        except Exception as e:
+            logger.warning("Database: get_live_last_price_map failed: %s", e)
+            return {}
+
     def ensure_live_state_mrs_0_cross_unix_column(self):
         """Unix time of last weekly mRS cross above 0 (master writes; dashboard reads)."""
         if DatabaseManager._mrs_0_cross_unix_column_checked:

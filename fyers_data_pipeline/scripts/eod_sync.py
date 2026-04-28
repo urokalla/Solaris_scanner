@@ -2,6 +2,7 @@ import sys
 import os
 import time
 import argparse
+import fcntl
 import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -44,6 +45,7 @@ NO_CANDLES = "no_candles"
 NO_DATA = "no_data"
 REJECTED = "rejected"  # API: invalid symbol / bad request (delisted or wrong ticker)
 FAIL = "fail"
+RATE_LIMIT = "rate_limit"
 
 # Gap-heal knobs (interior-gap detection against NIFTY50 session calendar)
 _GAP_HEAL_DAYS_DEFAULT = 30  # lookback window for gap detection
@@ -251,13 +253,29 @@ def sync_symbol(conn, pq_manager, symbol_in):
                 response.get("message", response),
             )
             return REJECTED
-        logger.error(f"Error syncing {symbol}: {response.get('message', 'Unknown Error')}")
+        msg = str(response.get("message", "Unknown Error") or "")
+        if "request limit reached" in msg.lower():
+            logger.error(f"Error syncing {symbol}: {msg}")
+            return RATE_LIMIT
+        logger.error(f"Error syncing {symbol}: {msg}")
     except Exception as e:
         logger.exception(f"Exception syncing {symbol_in}: {e}")
     return FAIL
 
 
 def main():
+    # Cross-process guard: skip if another eod_sync run is already active.
+    lock_dir = os.getenv('PIPELINE_DATA_DIR', os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'data', 'historical'))
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, '.eod_sync.lock')
+    lock_fh = open(lock_path, 'w')
+    try:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.warning("EOD skipped: another eod_sync process is already running.")
+        print("EOD_SYNC_RESULT skipped reason=already_running", flush=True)
+        sys.exit(0)
+
     ap = argparse.ArgumentParser(description="Append today’s 1D EOD bar per symbol (incremental).")
     ap.add_argument(
         "--no-tqdm",
@@ -364,6 +382,14 @@ def main():
 
     for i, symbol in iterator:
         code = sync_symbol(conn, pq_manager, symbol)
+        if code == RATE_LIMIT:
+            logger.error(
+                "Rate limit hit at %s/%s (%s). Stopping run early to avoid token/quota burn.",
+                i,
+                total,
+                symbol,
+            )
+            break
         counts[code] = counts.get(code, 0) + 1
         if heal_enabled and code not in (REJECTED,):
             filled = _heal_interior_gaps(conn, pq_manager, symbol, reference_dates, heal_days)

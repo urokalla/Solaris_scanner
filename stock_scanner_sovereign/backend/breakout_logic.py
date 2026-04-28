@@ -1,10 +1,10 @@
 import time, threading, logging, os
-from datetime import datetime, timezone
+from datetime import date, datetime, time as dt_time, timezone
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from zoneinfo import ZoneInfo
+from utils.zone_info import ZoneInfo
 
 from config.settings import settings
 from utils.breakout_math import calculate_breakout_signals
@@ -27,9 +27,52 @@ from utils.monthly_rsi2_trade_rules import (
 LGR = logging.getLogger("Breakout")
 _IST = ZoneInfo("Asia/Kolkata")
 
+# Bump when weekly E21C / last_tag_w parity logic changes; dashboard backfill will
+# recompute once (see breakout_engine) even if last_tag_w and brk levels look "complete".
+WEEKLY_CYCLE_PARITY_VERSION = 3
+
 # User-facing LAST TAG strings (used in UI, filters, colors).
 # E9T{n} / +E9T and ETDN were renamed; internal counters still use e9t_count / e9t.
 TAG_ET9_WAIT_F21C = "ET9DNWF21C"  # close under EMA9, waiting for 21C path (was ETDN)
+
+
+def _nse_ist_session_date_for_when(ts: float) -> date | None:
+    """
+    IST calendar day for a bar / event timestamp — same *date* axis as _fmt_last_event_ist
+    (EOD remapped display). Used for NSE week buckets, w_row==w_now, and WHEN (W) alignment.
+    """
+    try:
+        t = float(ts)
+        if t <= 0.0 or not bool(np.isfinite(t)):
+            return None
+        return datetime.fromtimestamp(t, tz=_IST).date()
+    except Exception:
+        return None
+
+
+def _nse_ist_cash_eod_ts_for_session_date(d: date) -> float:
+    h = int(settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_HOUR)
+    m = int(settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE)
+    return float(datetime.combine(d, dt_time(h, m), tzinfo=_IST).timestamp())
+
+
+def _nse_ist_cash_eod_ts_for_event_bar_ts(ts: float) -> float:
+    """
+    Canonical NSE cash-EOD unix for the bar’s IST session day. Use for last_event_ts_w so
+    the stored float matches WHEN (W) IST (15:30) instead of e.g. vendor midnight-UTC.
+    """
+    d = _nse_ist_session_date_for_when(ts)
+    if d is None:
+        return float(ts)
+    return _nse_ist_cash_eod_ts_for_session_date(d)
+
+
+def _bar_date_key_from_ts(ts: float) -> str:
+    try:
+        d = _nse_ist_session_date_for_when(float(ts))
+        return d.isoformat() if d is not None else ""
+    except Exception:
+        return ""
 
 
 def _tag_e9ct(n: int) -> str:
@@ -254,7 +297,9 @@ def _weekly_high_close_series_from_hv(hv: np.ndarray) -> tuple[np.ndarray, np.nd
             continue
         if not (np.isfinite(ts) and np.isfinite(hi) and np.isfinite(cl) and hi > 0 and cl > 0):
             continue
-        d = datetime.fromtimestamp(ts, tz=_IST).date()
+        d = _nse_ist_session_date_for_when(ts)
+        if d is None:
+            continue
         iso = d.isocalendar()
         k = (int(iso[0]), int(iso[1]))
         if k not in week:
@@ -286,14 +331,6 @@ def _decode_shm_grid_status(raw) -> str:
         return "—"
     s = s.strip("\x00").strip()
     return s if s else "—"
-
-
-def _bar_date_key_from_ts(ts: float) -> str:
-    try:
-        d = datetime.fromtimestamp(float(ts), tz=_IST).date()
-        return d.isoformat()
-    except Exception:
-        return ""
 
 
 def _cbuy_tag(idx: int) -> str:
@@ -331,108 +368,151 @@ def _timing_state_from_tag(tag_val: str, pending: bool) -> str:
     return "LOCKED"
 
 
-def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -> None:
-    """
-    Timing-only breakout tracker:
-    - Shows intraday breakout immediately on /breakout-timing (CBBUY/CB2BUY...).
-    - Finalizes or rolls back at 15:30 IST (daily) and Friday 15:30 IST (weekly).
-    """
+def _update_live_timing_breakout_status(
+    r: dict, ltp: float, now_dt: datetime, quote_event_ts=None
+) -> None:
     now_ts = float(now_dt.timestamp())
+    try:
+        qts = float(quote_event_ts) if quote_event_ts is not None else 0.0
+    except (TypeError, ValueError):
+        qts = 0.0
+    cross_ts = qts if qts > 0.0 else now_ts
     today = now_dt.date().isoformat()
-    cutoff_reached = (now_dt.hour, now_dt.minute) >= (15, 30)
     week_id = f"{int(now_dt.isocalendar().year)}-W{int(now_dt.isocalendar().week):02d}"
-    is_weekly_finalize_slot = now_dt.weekday() == 4 and cutoff_reached
+    cutoff = (now_dt.hour, now_dt.minute) >= (15, 30)
+    weekly_finalize = now_dt.weekday() == 4 and cutoff
 
-    # -------- Daily timing stream --------
-    d_brk = float(r.get("brk_lvl") or 0.0)
-    d_pending_day = str(r.get("cb_pending_day_d") or "")
-    d_pending_tag = str(r.get("cb_pending_tag_d") or "")
-    d_pending_ts = float(r.get("cb_pending_ts_d") or 0.0)
-    d_last_confirm_day = str(r.get("cb_last_confirm_day_d") or "")
-    confirmed_b_count_d = int(r.get("b_count", 0) or 0)
-    if confirmed_b_count_d <= 0:
-        confirmed_b_count_d = _infer_b_count_from_tag(r.get("last_tag"))
-    cb_count_d = int(r.get("cb_count_d", 0) or 0)
-    if cb_count_d < confirmed_b_count_d:
-        cb_count_d = confirmed_b_count_d
-        r["cb_count_d"] = cb_count_d
+    def _c_tag(base_tag: str, cb_idx: int) -> str:
+        t = str(base_tag or "").strip().upper()
+        if t.startswith("B") or t.startswith("RST"):
+            return f"CB{max(1, int(cb_idx))}"
+        if t.startswith("E9CT"):
+            return f"C{t}"
+        if t == TAG_ET9_WAIT_F21C:
+            return f"C{t}"
+        if t.startswith("E21C"):
+            return f"C{t}"
+        return f"C{t}" if t else "CB1"
 
-    if d_brk > 0 and ltp > d_brk and d_pending_day != today and d_last_confirm_day != today:
-        d_pending_day = today
-        d_pending_tag = _cbuy_tag(max(cb_count_d, confirmed_b_count_d) + 1)
-        d_pending_ts = now_ts
+    def _stream(*, now_id: str, finalize: bool, brk_key: str, last_tag_key: str, last_ts_key: str, b_count_key: str,
+                timing_tag_key: str, timing_ts_key: str, pend_id_key: str, pend_tag_key: str, pend_ts_key: str,
+                pend_prev_key: str, sustain_base_key: str, cb_count_key: str, live_px_key: str, live_id_key: str,
+                prev_id_key: str, prev_ltp_key: str, fail_id_key: str, fail_ts_key: str, is_weekly: bool):
+        base_tag = str(r.get(last_tag_key) or "—")
+        base_ts = float(r.get(last_ts_key, 0.0) or 0.0)
+        brk = float(r.get(brk_key) or 0.0)
+        prev_ltp = float(r.get(prev_ltp_key) or 0.0) if str(r.get(prev_id_key) or "") == now_id else 0.0
+        prev_close = 0.0
+        try:
+            chp = float(r.get("change_pct", 0.0) or 0.0)
+            den = 1.0 + chp / 100.0
+            if ltp > 0 and den > 0:
+                prev_close = float(ltp) / den
+        except (TypeError, ValueError, ZeroDivisionError):
+            prev_close = 0.0
+        crossed = bool(brk > 0 and ltp > brk and ((prev_ltp > 0 and prev_ltp <= brk) or (prev_ltp <= 0 and prev_close > 0 and prev_close <= brk)))
 
-    if d_pending_day == today and cutoff_reached:
-        if d_brk > 0 and ltp > d_brk:
-            cb_count_d += 1
-            r["cb_count_d"] = cb_count_d
-            r["timing_last_tag"] = _cbuy_tag(cb_count_d)
-            r["timing_last_event_ts"] = now_ts
-            r["cb_last_confirm_day_d"] = today
-        d_pending_day = ""
-        d_pending_tag = ""
-        d_pending_ts = 0.0
+        pend_id = str(r.get(pend_id_key) or "")
+        pend_tag = str(r.get(pend_tag_key) or "")
+        sustain_base = str(r.get(sustain_base_key) or "")
+        cur_timing = str(r.get(timing_tag_key) or "")
+        # Keep sustained timing event immutable for the same base cycle tag.
+        if cur_timing.endswith("S") and sustain_base and sustain_base == base_tag:
+            crossed = False
+        if crossed and pend_id != now_id:
+            if str(base_tag).strip().upper().startswith("RST"):
+                cb_idx = 1
+            else:
+                base_b = max(int(r.get(b_count_key, 0) or 0), _infer_b_count_from_tag(base_tag))
+                # Live timing page: if base B is from a prior bar bucket, crossing now implies next B.
+                # Example: base B2 (yesterday) + live cross today => CB3. If base already updated to
+                # B3 in the same bucket, keep CB3 (not CB4).
+                cb_idx = max(1, base_b)
+                if str(base_tag or "").strip().upper().startswith("B"):
+                    evt_ts = float(r.get(last_ts_key, 0.0) or 0.0)
+                    same_bucket = False
+                    if evt_ts > 0.0:
+                        dt = datetime.fromtimestamp(evt_ts, tz=_IST)
+                        if is_weekly:
+                            same_bucket = f"{int(dt.isocalendar().year)}-W{int(dt.isocalendar().week):02d}" == now_id
+                        else:
+                            same_bucket = dt.date().isoformat() == now_id
+                    if not same_bucket:
+                        cb_idx = max(1, base_b + 1)
+            # This branch is entered ONLY for Donchian breakout crossing events.
+            # Always use breakout-family timing tags (CBn), never CE*.
+            ctag = f"CB{cb_idx}"
+            r[pend_id_key], r[pend_tag_key], r[pend_ts_key], r[pend_prev_key] = now_id, ctag, cross_ts, str(r.get(timing_tag_key) or base_tag)
+            r[live_px_key], r[live_id_key] = float(ltp), now_id
 
-    if d_pending_day == today and d_pending_tag:
-        r["timing_last_tag"] = d_pending_tag
-        r["timing_last_event_ts"] = d_pending_ts if d_pending_ts > 0 else now_ts
-    else:
-        r.setdefault("timing_last_tag", str(r.get("last_tag") or "—"))
-        r.setdefault("timing_last_event_ts", float(r.get("last_event_ts", 0.0) or 0.0))
-        if not d_pending_day:
-            r["timing_last_tag"] = str(r.get("last_tag") or "—")
-            r["timing_last_event_ts"] = float(r.get("last_event_ts", 0.0) or 0.0)
+        pend_id = str(r.get(pend_id_key) or "")
+        pend_tag = str(r.get(pend_tag_key) or "")
+        if pend_id == now_id and pend_tag:
+            r[timing_tag_key] = pend_tag
+            r[timing_ts_key] = float(r.get(pend_ts_key) or 0.0) or now_ts
+            if finalize:
+                sustained = bool((pend_tag.startswith("CB") and brk > 0 and ltp > brk) or (pend_tag.startswith("CE9CT") and str(base_tag).upper().startswith("E9CT")) or (pend_tag == f"C{TAG_ET9_WAIT_F21C}" and str(base_tag).upper() == TAG_ET9_WAIT_F21C) or (pend_tag.startswith("CE21C") and str(base_tag).upper().startswith("E21C")))
+                if sustained:
+                    r[timing_tag_key] = f"{pend_tag}S"
+                    r[timing_ts_key] = float(r.get(pend_ts_key) or 0.0) or now_ts
+                    r[sustain_base_key] = base_tag
+                    r[fail_id_key], r[fail_ts_key] = "", 0.0
+                    if pend_tag.startswith("CB"):
+                        try:
+                            r[cb_count_key] = int(pend_tag[2:] or "1")
+                        except ValueError:
+                            r[cb_count_key] = max(1, int(r.get(cb_count_key, 0) or 0))
+                else:
+                    # Keep a lightweight audit marker so "NOT_SUSTAINED" can show
+                    # today's failed intraday crosses without changing tag behavior.
+                    r[fail_id_key], r[fail_ts_key] = now_id, float(r.get(pend_ts_key) or 0.0) or now_ts
+                    r[timing_tag_key] = str(r.get(pend_prev_key) or base_tag or "RST")
+                    r[timing_ts_key] = base_ts if base_ts > 0 else now_ts
+                    r[sustain_base_key] = ""
+                r[pend_id_key], r[pend_tag_key], r[pend_ts_key], r[pend_prev_key] = "", "", 0.0, ""
+                r[live_px_key], r[live_id_key] = 0.0, ""
+        else:
+            cur_timing = str(r.get(timing_tag_key) or "")
+            sustain_base = str(r.get(sustain_base_key) or "")
+            if cur_timing.endswith("S") and sustain_base and sustain_base == base_tag:
+                # Keep sustained timing tag sticky until base cycle tag changes.
+                r[timing_ts_key] = float(r.get(timing_ts_key, 0.0) or 0.0)
+                # Preserve live breakout anchor for current bucket so "% from breakout" remains visible.
+                if str(r.get(live_id_key) or "") != now_id:
+                    r[live_px_key] = float(ltp) if float(ltp or 0) > 0 else float(r.get(live_px_key, 0.0) or 0.0)
+                    r[live_id_key] = now_id
+            else:
+                r[timing_tag_key] = base_tag
+                r[timing_ts_key] = base_ts
+                r[sustain_base_key] = ""
+                r[live_px_key], r[live_id_key] = 0.0, ""
 
-    r["cb_pending_day_d"] = d_pending_day
-    r["cb_pending_tag_d"] = d_pending_tag
-    r["cb_pending_ts_d"] = d_pending_ts
+        r[prev_id_key] = now_id
+        r[prev_ltp_key] = float(ltp) if ltp > 0 else 0.0
 
-    # -------- Weekly timing stream --------
-    w_brk = float(r.get("brk_lvl_w") or 0.0)
-    w_pending_week = str(r.get("cb_pending_week_w") or "")
-    w_pending_tag = str(r.get("cb_pending_tag_w") or "")
-    w_pending_ts = float(r.get("cb_pending_ts_w") or 0.0)
-    w_last_confirm_week = str(r.get("cb_last_confirm_week_w") or "")
-    confirmed_b_count_w = int(r.get("b_count_w", 0) or 0)
-    if confirmed_b_count_w <= 0:
-        confirmed_b_count_w = _infer_b_count_from_tag(r.get("last_tag_w"))
-    cb_count_w = int(r.get("cb_count_w", 0) or 0)
-    if cb_count_w < confirmed_b_count_w:
-        cb_count_w = confirmed_b_count_w
-        r["cb_count_w"] = cb_count_w
-
-    if w_brk > 0 and ltp > w_brk and w_pending_week != week_id and w_last_confirm_week != week_id:
-        w_pending_week = week_id
-        w_pending_tag = _cbuy_tag(max(cb_count_w, confirmed_b_count_w) + 1)
-        w_pending_ts = now_ts
-
-    if w_pending_week == week_id and is_weekly_finalize_slot:
-        if w_brk > 0 and ltp > w_brk:
-            cb_count_w += 1
-            r["cb_count_w"] = cb_count_w
-            r["timing_last_tag_w"] = _cbuy_tag(cb_count_w)
-            r["timing_last_event_ts_w"] = now_ts
-            r["cb_last_confirm_week_w"] = week_id
-        w_pending_week = ""
-        w_pending_tag = ""
-        w_pending_ts = 0.0
-
-    if w_pending_week == week_id and w_pending_tag:
-        r["timing_last_tag_w"] = w_pending_tag
-        r["timing_last_event_ts_w"] = w_pending_ts if w_pending_ts > 0 else now_ts
-    else:
-        r.setdefault("timing_last_tag_w", str(r.get("last_tag_w") or "—"))
-        r.setdefault("timing_last_event_ts_w", float(r.get("last_event_ts_w", 0.0) or 0.0))
-        if not w_pending_week:
-            r["timing_last_tag_w"] = str(r.get("last_tag_w") or "—")
-            r["timing_last_event_ts_w"] = float(r.get("last_event_ts_w", 0.0) or 0.0)
-
-    r["cb_pending_week_w"] = w_pending_week
-    r["cb_pending_tag_w"] = w_pending_tag
-    r["cb_pending_ts_w"] = w_pending_ts
+    _stream(
+        now_id=today, finalize=cutoff, brk_key="brk_lvl", last_tag_key="last_tag", last_ts_key="last_event_ts", b_count_key="b_count",
+        timing_tag_key="timing_last_tag", timing_ts_key="timing_last_event_ts",
+        pend_id_key="cb_pending_day_d", pend_tag_key="cb_pending_tag_d", pend_ts_key="cb_pending_ts_d", pend_prev_key="cb_pending_prev_tag_d",
+        sustain_base_key="cb_sustain_base_tag_d",
+        cb_count_key="cb_count_d", live_px_key="cb_live_entry_px_d", live_id_key="cb_live_entry_day_d",
+        prev_id_key="cb_prev_day_d", prev_ltp_key="cb_prev_ltp_d",
+        fail_id_key="cb_not_sustained_day_d", fail_ts_key="cb_not_sustained_ts_d", is_weekly=False,
+    )
+    _stream(
+        now_id=week_id, finalize=weekly_finalize, brk_key="brk_lvl_w", last_tag_key="last_tag_w", last_ts_key="last_event_ts_w", b_count_key="b_count_w",
+        timing_tag_key="timing_last_tag_w", timing_ts_key="timing_last_event_ts_w",
+        pend_id_key="cb_pending_week_w", pend_tag_key="cb_pending_tag_w", pend_ts_key="cb_pending_ts_w", pend_prev_key="cb_pending_prev_tag_w",
+        sustain_base_key="cb_sustain_base_tag_w",
+        cb_count_key="cb_count_w", live_px_key="cb_live_entry_px_w", live_id_key="cb_live_entry_week_w",
+        prev_id_key="cb_prev_week_w", prev_ltp_key="cb_prev_ltp_w",
+        fail_id_key="cb_not_sustained_week_w", fail_ts_key="cb_not_sustained_ts_w", is_weekly=True,
+    )
 
 
-def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 10) -> None:
+def _update_minimal_cycle_state(
+    r: dict, hv: np.ndarray | None, don_len: int = 10, *, weekly: bool = False
+) -> None:
     if hv is None or len(hv) < 6:
         return
     try:
@@ -452,6 +532,18 @@ def _update_minimal_cycle_state(r: dict, hv: np.ndarray | None, don_len: int = 1
                     settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE,
                 ):
                     i = len(hv) - 1
+        # Weekly OHLC: each row is an ISO week; last row updates intraday. TradingView
+        # weekly/confirmed = last *closed* week, not the developing week — same as
+        # deferring an incomplete bar. Do not i=len-1 on the in-progress last week
+        # (avoids e.g. E21C8 on dashboard while TV still shows E21C7 on last confirm).
+        if weekly and len(hv) >= 2:
+            t_last = float(hv[-1][0])
+            d_last = _nse_ist_session_date_for_when(t_last)
+            if d_last is not None:
+                w_row = d_last.isocalendar()[:2]
+                w_now = now_dt.date().isocalendar()[:2]
+                if w_row == w_now:
+                    i = min(i, len(hv) - 2)
         if i < 3:
             return
         curr = hv[i]
@@ -651,7 +743,9 @@ def _weekly_ohlc5_from_daily_hv(hv: np.ndarray | None) -> np.ndarray | None:
             ts = float(row[0]); op = float(row[1]); hi = float(row[2]); lo = float(row[3]); cl = float(row[4])
         except Exception:
             continue
-        d = datetime.fromtimestamp(ts, tz=_IST).date()
+        d = _nse_ist_session_date_for_when(ts)
+        if d is None:
+            continue
         iso = d.isocalendar()
         k = (int(iso[0]), int(iso[1]))
         if k not in week:
@@ -712,23 +806,46 @@ def _weekly_atr_stop_from_daily_hv(
 
 def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: int = 10) -> None:
     w = _weekly_ohlc5_from_daily_hv(hv)
-    if w is None:
+    if w is None or len(w) < 2:
         return
+    # Drop the in-progress ISO week before EMA/Donchian: those series are computed on *all*
+    # rows of hv; a partial last week shifts EMA at every prior index vs TradingView weekly,
+    # which can add an extra E21C (e.g. E21C8 here vs E21C7 on TV). Slice whenever the last
+    # bar is in the current ISO week (any history length), but require >=6 *completed* weeks
+    # of history after the drop to satisfy _update_minimal_cycle_state's min bar count.
+    now_dt = datetime.now(_IST)
+    t_last = float(w[-1][0])
+    if not np.isfinite(t_last) or t_last <= 0:
+        return
+    d_last = _nse_ist_session_date_for_when(t_last)
+    if d_last is None:
+        return
+    w_row = d_last.isocalendar()[:2]
+    w_now = now_dt.date().isocalendar()[:2]
+    w_run = w
+    if w_row == w_now:
+        w_run = np.asarray(w[:-1], dtype=np.float64)
+    if len(w_run) < 6:
+        return
+    # Always full replay on weekly[] (empty cycle_last_bar_key) so last_tag_w / e21c_count_w
+    # match a TradingView-style “confirmed weeks only” run. Incremental re-use of
+    # cycle_last_bar_key_w kept stale counts after the weekly index fix (E21C8 vs TV E21C7)
+    # until the key happened to change.
     tmp = {
-        "cycle_state": r.get("cycle_state_w", 0),
-        "below21_count": r.get("below21_count_w", 0),
-        "b_count": r.get("b_count_w", 0),
-        "e9t_count": r.get("e9t_count_w", 0),
-        "e21c_count": r.get("e21c_count_w", 0),
-        "rst_count": r.get("rst_count_w", 0),
-        "last_tag": r.get("last_tag_w", "—"),
-        "last_event_ts": r.get("last_event_ts_w", 0.0),
-        "cycle_last_bar_key": r.get("cycle_last_bar_key_w", ""),
+        "cycle_state": 0,
+        "below21_count": 0,
+        "b_count": 0,
+        "e9t_count": 0,
+        "e21c_count": 0,
+        "rst_count": 0,
+        "last_tag": "—",
+        "last_event_ts": 0.0,
+        "cycle_last_bar_key": "",
         "brk_lvl": r.get("brk_lvl_w"),
-        "brk_b_anchor_close": float(r.get("brk_b_anchor_close_w", 0.0) or 0.0),
-        "brk_b_anchor_ts": float(r.get("brk_b_anchor_ts_w", 0.0) or 0.0),
+        "brk_b_anchor_close": 0.0,
+        "brk_b_anchor_ts": 0.0,
     }
-    _update_minimal_cycle_state(tmp, w, don_len=don_len)
+    _update_minimal_cycle_state(tmp, w_run, don_len=don_len, weekly=True)
     cstate = int(tmp.get("cycle_state", 0) or 0)
     r["cycle_state_w"] = cstate
     r["state_name_w"] = "LOCKED" if cstate == 0 else ("TRENDING" if cstate == 1 else "PULLBACK")
@@ -738,12 +855,14 @@ def _update_minimal_cycle_state_weekly(r: dict, hv: np.ndarray | None, don_len: 
     r["e21c_count_w"] = int(tmp.get("e21c_count", 0) or 0)
     r["rst_count_w"] = int(tmp.get("rst_count", 0) or 0)
     r["last_tag_w"] = str(tmp.get("last_tag", "—") or "—")
-    r["last_event_ts_w"] = float(tmp.get("last_event_ts", 0.0) or 0.0)
+    _let = float(tmp.get("last_event_ts", 0.0) or 0.0)
+    r["last_event_ts_w"] = _nse_ist_cash_eod_ts_for_event_bar_ts(_let) if _let > 0.0 else 0.0
     r["cycle_last_bar_key_w"] = str(tmp.get("cycle_last_bar_key", "") or "")
     if tmp.get("brk_lvl") is not None:
         r["brk_lvl_w"] = tmp.get("brk_lvl")
     r["brk_b_anchor_close_w"] = float(tmp.get("brk_b_anchor_close", 0) or 0)
     r["brk_b_anchor_ts_w"] = float(tmp.get("brk_b_anchor_ts", 0) or 0)
+    r["_wcycle_v"] = WEEKLY_CYCLE_PARITY_VERSION
 
 
 def initial_sync_helper(self):
@@ -1097,7 +1216,15 @@ def main_loop_helper(self):
                     _r = self.results.get(s)
                 if _r is None:
                     continue
-                _update_live_timing_breakout_status(_r, float(row["ltp"]), datetime.now(_IST))
+                _hb_ts = None
+                try:
+                    if "heartbeat" in row.dtype.names:
+                        _hb_ts = float(row["heartbeat"])
+                except Exception:
+                    pass
+                _update_live_timing_breakout_status(
+                    _r, float(row["ltp"]), datetime.now(_IST), _hb_ts
+                )
                 p["rs_rating_info"] = {
                     "rs_rating": int(row['rs_rating']),
                     "mrs": current_mrs,
@@ -1654,7 +1781,22 @@ def _fmt_last_event_ist(ts_raw) -> str:
         t = float(ts_raw or 0.0)
         if t <= 0:
             return "—"
-        return datetime.fromtimestamp(t, tz=_IST).strftime("%Y-%m-%d %H:%M IST")
+        dt_utc = datetime.fromtimestamp(t, tz=timezone.utc)
+        # Parquet / vendors often key daily rows at 00:00 UTC → 05:30 IST; map to NSE-style EOD display.
+        if (
+            dt_utc.microsecond == 0
+            and dt_utc.second == 0
+            and dt_utc.minute == 0
+            and dt_utc.hour == 0
+        ):
+            d_ist = _nse_ist_session_date_for_when(t)
+            if d_ist is None:
+                return "—"
+            h = int(settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_HOUR)
+            m = int(settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE)
+            close_dt = datetime.combine(d_ist, dt_time(h, m), tzinfo=_IST)
+            return close_dt.strftime("%Y-%m-%d %H:%M:%S IST")
+        return datetime.fromtimestamp(t, tz=_IST).strftime("%Y-%m-%d %H:%M:%S IST")
     except Exception:
         return "—"
 
@@ -1823,14 +1965,15 @@ def format_ui_row(d):
     brk_move_ui = "—"
     brk_move_band = "—"
     brk_move_color = "#888888"
-    _b_anchor = float(d.get("brk_b_anchor_close", 0.0) or 0.0)
+    # % FROM B tracks move from breakout LEVEL (Donchian), not from live captured entry.
+    _b_anchor = float(d.get("brk_lvl", 0.0) or 0.0)
     _b_anchor_ts = float(d.get("brk_b_anchor_ts", 0.0) or 0.0)
     brk_b_anchor_dt = _fmt_last_event_ist(_b_anchor_ts) if _b_anchor_ts > 0 else "—"
     try:
         if _b_anchor > 0 and _ltp_num > 0:
             brk_move_pct = ((_ltp_num / _b_anchor) - 1.0) * 100.0
             brk_move_ui = f"{brk_move_pct:+.2f}%"
-            brk_move_band = "B bar close"
+            brk_move_band = "Breakout level"
             if brk_move_pct > 0:
                 brk_move_color = "#00FF00"
             elif brk_move_pct < 0:
@@ -1843,7 +1986,7 @@ def format_ui_row(d):
     brk_move_pct_w = None
     brk_move_ui_w = "—"
     brk_move_color_w = "#888888"
-    _b_anchor_w = float(d.get("brk_b_anchor_close_w", 0.0) or 0.0)
+    _b_anchor_w = float(d.get("brk_lvl_w", 0.0) or 0.0)
     _b_anchor_ts_w = float(d.get("brk_b_anchor_ts_w", 0.0) or 0.0)
     brk_b_anchor_dt_w = _fmt_last_event_ist(_b_anchor_ts_w) if _b_anchor_ts_w > 0 else "—"
     try:
@@ -1856,6 +1999,39 @@ def format_ui_row(d):
                 brk_move_color_w = "#FF3131"
             else:
                 brk_move_color_w = "#D1D1D1"
+    except Exception:
+        pass
+
+    # % since LTP when price first crossed brk_lvl this IST day (timing CB), not structural B close.
+    brk_move_live_ui = "—"
+    brk_move_live_color = "#666666"
+    _live_px_d = float(d.get("cb_live_entry_px_d", 0.0) or 0.0)
+    try:
+        if _live_px_d > 0 and _ltp_num > 0:
+            _lmd = ((_ltp_num / _live_px_d) - 1.0) * 100.0
+            brk_move_live_ui = f"{_lmd:+.2f}%"
+            if _lmd > 0:
+                brk_move_live_color = "#00FF00"
+            elif _lmd < 0:
+                brk_move_live_color = "#FF3131"
+            else:
+                brk_move_live_color = "#D1D1D1"
+    except Exception:
+        pass
+
+    brk_move_live_ui_w = "—"
+    brk_move_live_color_w = "#666666"
+    _live_px_w = float(d.get("cb_live_entry_px_w", 0.0) or 0.0)
+    try:
+        if _live_px_w > 0 and _ltp_num > 0:
+            _lmw = ((_ltp_num / _live_px_w) - 1.0) * 100.0
+            brk_move_live_ui_w = f"{_lmw:+.2f}%"
+            if _lmw > 0:
+                brk_move_live_color_w = "#00FF00"
+            elif _lmw < 0:
+                brk_move_live_color_w = "#FF3131"
+            else:
+                brk_move_live_color_w = "#D1D1D1"
     except Exception:
         pass
 
@@ -1934,6 +2110,10 @@ def format_ui_row(d):
         'brk_b_anchor_dt': brk_b_anchor_dt,
         'brk_move_pct_w': brk_move_ui_w,
         'brk_move_color_w': brk_move_color_w,
+        'brk_move_live_pct': brk_move_live_ui,
+        'brk_move_live_color': brk_move_live_color,
+        'brk_move_live_pct_w': brk_move_live_ui_w,
+        'brk_move_live_color_w': brk_move_live_color_w,
         'brk_b_anchor_dt_w': brk_b_anchor_dt_w,
         'brk_lvl_w': brk_w_disp,
         'tf_ema': tf_ema_disp,
@@ -2026,4 +2206,5 @@ def format_ui_row(d):
         'setup_score_ui': setup_score_ui,
         'setup_score_color': setup_score_color,
     })
+    d.pop("_wcycle_v", None)
     return d

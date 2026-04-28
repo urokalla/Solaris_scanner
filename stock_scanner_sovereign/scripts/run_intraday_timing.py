@@ -58,12 +58,26 @@ def _timing_state_from_tag(tag_val: str, pending: bool) -> str:
     return "LOCKED"
 
 
-def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -> None:
+def _update_live_timing_breakout_status(
+    r: dict, ltp: float, now_dt: datetime, quote_event_ts=None
+) -> None:
     now_ts = float(now_dt.timestamp())
+    try:
+        _qts = float(quote_event_ts) if quote_event_ts is not None else 0.0
+    except (TypeError, ValueError):
+        _qts = 0.0
+    cross_ts = _qts if _qts > 0.0 else now_ts
     today = now_dt.date().isoformat()
     cutoff_reached = (now_dt.hour, now_dt.minute) >= (15, 30)
     week_id = "{}-W{:02d}".format(int(now_dt.isocalendar()[0]), int(now_dt.isocalendar()[1]))
     is_weekly_finalize_slot = now_dt.weekday() == 4 and cutoff_reached
+
+    if str(r.get("cb_live_entry_day_d") or "") and str(r.get("cb_live_entry_day_d")) != today:
+        r["cb_live_entry_px_d"] = 0.0
+        r["cb_live_entry_day_d"] = ""
+    if str(r.get("cb_live_entry_week_w") or "") and str(r.get("cb_live_entry_week_w")) != week_id:
+        r["cb_live_entry_px_w"] = 0.0
+        r["cb_live_entry_week_w"] = ""
 
     d_brk = float(r.get("brk_lvl") or 0.0)
     d_pending_day = str(r.get("cb_pending_day_d") or "")
@@ -81,14 +95,17 @@ def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -
     if d_brk > 0 and ltp > d_brk and d_pending_day != today and d_last_confirm_day != today:
         d_pending_day = today
         d_pending_tag = _cbuy_tag(max(cb_count_d, confirmed_b_count_d) + 1)
-        d_pending_ts = now_ts
+        d_pending_ts = cross_ts
+        r["cb_live_entry_px_d"] = float(ltp)
+        r["cb_live_entry_day_d"] = today
 
     if d_pending_day == today and cutoff_reached:
         if d_brk > 0 and ltp > d_brk:
             cb_count_d += 1
             r["cb_count_d"] = cb_count_d
             r["timing_last_tag"] = _cbuy_tag(cb_count_d)
-            r["timing_last_event_ts"] = now_ts
+            _fin_d = float(d_pending_ts or 0.0)
+            r["timing_last_event_ts"] = _fin_d if _fin_d > 0 else now_ts
             r["cb_last_confirm_day_d"] = today
         d_pending_day = ""
         d_pending_tag = ""
@@ -101,8 +118,17 @@ def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -
         r.setdefault("timing_last_tag", str(r.get("last_tag") or "—"))
         r.setdefault("timing_last_event_ts", float(r.get("last_event_ts", 0.0) or 0.0))
         if not d_pending_day:
-            r["timing_last_tag"] = str(r.get("last_tag") or "—")
-            r["timing_last_event_ts"] = float(r.get("last_event_ts", 0.0) or 0.0)
+            _ltu = str(r.get("last_tag") or "").strip().upper()
+            _cycle_resets_timing = (
+                _ltu.startswith("RST")
+                or _ltu == TAG_ET9_WAIT_F21C
+                or _ltu.startswith(("E9CT", "E21C"))
+            )
+            if str(r.get("cb_last_confirm_day_d") or "") != today or _cycle_resets_timing:
+                r["timing_last_tag"] = str(r.get("last_tag") or "—")
+                r["timing_last_event_ts"] = float(r.get("last_event_ts", 0.0) or 0.0)
+                r["cb_live_entry_px_d"] = 0.0
+                r["cb_live_entry_day_d"] = ""
 
     r["cb_pending_day_d"] = d_pending_day
     r["cb_pending_tag_d"] = d_pending_tag
@@ -124,14 +150,17 @@ def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -
     if w_brk > 0 and ltp > w_brk and w_pending_week != week_id and w_last_confirm_week != week_id:
         w_pending_week = week_id
         w_pending_tag = _cbuy_tag(max(cb_count_w, confirmed_b_count_w) + 1)
-        w_pending_ts = now_ts
+        w_pending_ts = cross_ts
+        r["cb_live_entry_px_w"] = float(ltp)
+        r["cb_live_entry_week_w"] = week_id
 
     if w_pending_week == week_id and is_weekly_finalize_slot:
         if w_brk > 0 and ltp > w_brk:
             cb_count_w += 1
             r["cb_count_w"] = cb_count_w
             r["timing_last_tag_w"] = _cbuy_tag(cb_count_w)
-            r["timing_last_event_ts_w"] = now_ts
+            _fin_w = float(w_pending_ts or 0.0)
+            r["timing_last_event_ts_w"] = _fin_w if _fin_w > 0 else now_ts
             r["cb_last_confirm_week_w"] = week_id
         w_pending_week = ""
         w_pending_tag = ""
@@ -144,8 +173,17 @@ def _update_live_timing_breakout_status(r: dict, ltp: float, now_dt: datetime) -
         r.setdefault("timing_last_tag_w", str(r.get("last_tag_w") or "—"))
         r.setdefault("timing_last_event_ts_w", float(r.get("last_event_ts_w", 0.0) or 0.0))
         if not w_pending_week:
-            r["timing_last_tag_w"] = str(r.get("last_tag_w") or "—")
-            r["timing_last_event_ts_w"] = float(r.get("last_event_ts_w", 0.0) or 0.0)
+            _ltuw = str(r.get("last_tag_w") or "").strip().upper()
+            _cycle_resets_timing_w = (
+                _ltuw.startswith("RST")
+                or _ltuw == TAG_ET9_WAIT_F21C
+                or _ltuw.startswith(("E9CT", "E21C"))
+            )
+            if str(r.get("cb_last_confirm_week_w") or "") != week_id or _cycle_resets_timing_w:
+                r["timing_last_tag_w"] = str(r.get("last_tag_w") or "—")
+                r["timing_last_event_ts_w"] = float(r.get("last_event_ts_w", 0.0) or 0.0)
+                r["cb_live_entry_px_w"] = 0.0
+                r["cb_live_entry_week_w"] = ""
 
     r["cb_pending_week_w"] = w_pending_week
     r["cb_pending_tag_w"] = w_pending_tag

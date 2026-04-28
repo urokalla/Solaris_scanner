@@ -50,23 +50,23 @@ services:
       - ./stock_scanner_sovereign/.env
     volumes:
       - ./fyers_data_pipeline:/app
-      # Repository code/config (directory mount — token file inside is naturally visible to the
-      # container; DO NOT also bind the single access_token.txt file here or macOS Docker will hit
-      # the stale-inode bug whenever the token is rewritten by auto_auth.py on the host).
-      - ./stock_scanner_sovereign:/app/stock_scanner_sovereign
+      # Mount stock_scanner_sovereign outside /app to avoid subpath bind collisions
+      # with ./fyers_data_pipeline:/app (which can make pipeline read a stale token copy).
+      - ./stock_scanner_sovereign:/workspace_stock_scanner
     environment:
       - DB_HOST=db
       - HOME=/app
-      - PYTHONPATH=/app/stock_scanner_sovereign
-      - FYERS_ACCESS_TOKEN_PATH=/app/stock_scanner_sovereign/access_token.txt
+      - PYTHONPATH=/workspace_stock_scanner
+      - FYERS_ACCESS_TOKEN_PATH=/workspace_stock_scanner/access_token.txt
       # EOD / backoff behavior when the token is expired:
       # - eod_sync exits cleanly (no stacktrace, no hard fail)
       # - scheduler retries at most every EOD_TOKEN_RETRY_MINUTES (default 60) so logs stay quiet
       # - the moment access_token.txt is overwritten on the host, the next tick runs immediately
       - EOD_TOKEN_RETRY_MINUTES=${EOD_TOKEN_RETRY_MINUTES:-60}
-      # EOD: append today’s 1D bar after NSE close (Mon–Fri), default first run after 15:45 IST
-      - EOD_SYNC_IST_HOUR=15
-      - EOD_SYNC_IST_MINUTE=45
+      # EOD: append today’s 1D bar (Mon–Fri), only inside IST window starting 16:00 (see main.py)
+      - EOD_SYNC_IST_HOUR=16
+      - EOD_SYNC_IST_MINUTE=0
+      - EOD_SYNC_IST_WINDOW_MINUTES=${EOD_SYNC_IST_WINDOW_MINUTES:-20}
       # EOD: universe_members for EOD_UNIVERSE_ID (default ALL_NSE), only -EQ / -INDEX
       - EOD_UNIVERSE_ID=${EOD_UNIVERSE_ID:-ALL_NSE}
       - EOD_NIFTY500_ONLY=${EOD_NIFTY500_ONLY:-0}

@@ -44,6 +44,14 @@ def _write_date_flag(name: str, day: str) -> None:
         f.write(day.strip() + "\n")
 
 
+def _eod_attempted_today(today_str: str) -> bool:
+    return _read_date_flag(".eod_last_attempt_date") == today_str
+
+
+def _mark_eod_attempt_today(today_str: str) -> None:
+    _write_date_flag(".eod_last_attempt_date", today_str)
+
+
 def run_python_file(script_path: str) -> tuple[bool, str]:
     """Run a Python file; returns (ok, stdout) so callers can inspect markers like token_expired."""
     logger.info(f"🚀 Starting script: {script_path}")
@@ -106,9 +114,10 @@ def _token_mtime_hours() -> float | None:
 def main_loop():
     logger.info("📡 Sovereign Pipeline Service Started")
 
-    eod_h = int(os.getenv("EOD_SYNC_IST_HOUR", "15"))
-    eod_m = int(os.getenv("EOD_SYNC_IST_MINUTE", "45"))
-    eod_after = dt_time(eod_h, eod_m)
+    eod_h = int(os.getenv("EOD_SYNC_IST_HOUR", "16"))
+    eod_m = int(os.getenv("EOD_SYNC_IST_MINUTE", "0"))
+    # Only fire inside [EOD_SYNC_IST, +window); avoids running eod_sync all evening if flags glitch.
+    eod_window_min = max(5, int(os.getenv("EOD_SYNC_IST_WINDOW_MINUTES", "20")))
 
     snap_h = int(os.getenv("MONTHLY_RSI2_SNAPSHOT_IST_HOUR", "15"))
     snap_m = int(os.getenv("MONTHLY_RSI2_SNAPSHOT_IST_MINUTE", "0"))
@@ -132,6 +141,13 @@ def main_loop():
         "On expiry, EOD skips gracefully and retries every %d min (EOD_TOKEN_RETRY_MINUTES).",
         token_retry_min,
     )
+    _eod_span = max(eod_window_min, token_retry_min + 10)
+    logger.info(
+        "📥 Daily EOD sync: weekdays IST, first eligible minute %02d:%02d, window %d min (covers token backoff).",
+        eod_h,
+        eod_m,
+        _eod_span,
+    )
     try:
         age = _token_mtime_hours()
         if age is None:
@@ -148,39 +164,44 @@ def main_loop():
     last_token_skip_ts: float = 0.0
     last_token_skip_mtime: float = 0.0
 
-    # Startup catch-up: if the last EOD success is stale (>0 calendar days) and the
-    # most-recent completed trading session is past, trigger EOD immediately so
-    # eod_sync's gap-heal pass repairs the series without waiting for 15:45 IST.
+    # Startup catch-up can consume API quota if the container restarts repeatedly.
+    # Keep OFF by default; enable explicitly when you need catch-up behavior.
+    startup_catchup_enabled = os.getenv("EOD_STARTUP_CATCHUP", "0").strip().lower() in ("1", "true", "yes")
+
+    # Startup catch-up: when enabled and stale, trigger EOD immediately so eod_sync's
+    # gap-heal pass repairs series without waiting for the scheduled run.
     try:
-        startup_ist = _ist_now()
-        last_ok_str = _read_date_flag(".eod_last_ok_date")
-        last_ok_date = datetime.strptime(last_ok_str, "%Y-%m-%d").date() if last_ok_str else None
-        today_ist_date = startup_ist.date()
-        # "Catch up" when the flag is older than today; eod_sync + heal pass handles
-        # any interior gaps going back EOD_HEAL_DAYS.
-        stale = last_ok_date is None or last_ok_date < today_ist_date
-        if stale:
-            logger.info(
-                "🩹 [Scheduler] Startup catch-up: last EOD ok=%s, running eod_sync now "
-                "(gap-heal window=EOD_HEAL_DAYS)",
-                last_ok_str or "never",
-            )
-            ok, stdout = run_script_verbose(os.path.join("scripts", "eod_sync.py"))
-            if "reason=token_expired" in stdout:
-                logger.warning(
-                    "🔐 Startup EOD skipped: access token expired. "
-                    "Drop a fresh token into access_token.txt; scheduler will retry automatically."
+        if startup_catchup_enabled:
+            startup_ist = _ist_now()
+            last_ok_str = _read_date_flag(".eod_last_ok_date")
+            last_ok_date = datetime.strptime(last_ok_str, "%Y-%m-%d").date() if last_ok_str else None
+            today_ist_date = startup_ist.date()
+            stale = last_ok_date is None or last_ok_date < today_ist_date
+            if stale and not _eod_attempted_today(today_ist_date.isoformat()):
+                logger.info(
+                    "🩹 [Scheduler] Startup catch-up: last EOD ok=%s, running eod_sync now "
+                    "(gap-heal window=EOD_HEAL_DAYS)",
+                    last_ok_str or "never",
                 )
-                last_token_skip_ts = time.time()
-                try:
-                    last_token_skip_mtime = os.path.getmtime(
-                        os.getenv("FYERS_ACCESS_TOKEN_PATH")
-                        or os.path.join(_ROOT, "stock_scanner_sovereign", "access_token.txt")
+                ok, stdout = run_script_verbose(os.path.join("scripts", "eod_sync.py"))
+                if "reason=token_expired" in stdout:
+                    logger.warning(
+                        "🔐 Startup EOD skipped: access token expired. "
+                        "Drop a fresh token into access_token.txt; scheduler will retry automatically."
                     )
-                except OSError:
-                    last_token_skip_mtime = 0.0
-            elif ok:
-                _write_date_flag(".eod_last_ok_date", today_ist_date.isoformat())
+                    last_token_skip_ts = time.time()
+                    try:
+                        last_token_skip_mtime = os.path.getmtime(
+                            os.getenv("FYERS_ACCESS_TOKEN_PATH")
+                            or os.path.join(_ROOT, "stock_scanner_sovereign", "access_token.txt")
+                        )
+                    except OSError:
+                        last_token_skip_mtime = 0.0
+                else:
+                    # Count any non-token run as today's attempt to avoid repeated quota drain.
+                    _mark_eod_attempt_today(today_ist_date.isoformat())
+                    if ok or "EOD_SYNC_RESULT ok=" in stdout:
+                        _write_date_flag(".eod_last_ok_date", today_ist_date.isoformat())
     except Exception as e:
         logger.exception("Startup catch-up failed: %s", e)
 
@@ -191,14 +212,17 @@ def main_loop():
             current_time = now_ist.time()
             today_str = current_date.isoformat()
 
-            # JOB 1: Daily EOD — append today’s 1D bar after NSE close (~15:30 IST); data usually ready by ~15:45 IST
-            # Mon–Fri only; first loop after EOD_SYNC_IST_* where we haven’t succeeded today.
+            # JOB 1: Daily EOD — one IST window per weekday (default 16:00 + span), not all evening.
+            # Mon–Fri only; inside window where we haven’t succeeded today.
             # If the Fyers token is expired, eod_sync exits 0 and prints an "EOD_SYNC_RESULT
             # skipped reason=token_expired" marker. We detect that here and back off for
             # EOD_TOKEN_RETRY_MINUTES — but if access_token.txt mtime changes (operator dropped
             # a fresh token) we retry right away.
-            if now_ist.weekday() < 5 and current_time >= eod_after:
-                if _read_date_flag(".eod_last_ok_date") != today_str:
+            _cur_min = current_time.hour * 60 + current_time.minute
+            _eod_start_min = eod_h * 60 + eod_m
+            _in_eod_window = _eod_start_min <= _cur_min < _eod_start_min + _eod_span
+            if now_ist.weekday() < 5 and _in_eod_window:
+                if _read_date_flag(".eod_last_ok_date") != today_str and not _eod_attempted_today(today_str):
                     skip_due_to_backoff = False
                     if last_token_skip_ts > 0:
                         now_ts = time.time()
@@ -234,10 +258,14 @@ def main_loop():
                                 )
                             except OSError:
                                 last_token_skip_mtime = 0.0
-                        elif ok:
-                            _write_date_flag(".eod_last_ok_date", today_str)
-                            last_token_skip_ts = 0.0
-                            last_token_skip_mtime = 0.0
+                        else:
+                            # Record today's attempt regardless of script exit code to guarantee
+                            # "one scheduled EOD attempt per day" and prevent retry storms.
+                            _mark_eod_attempt_today(today_str)
+                            if ok or "EOD_SYNC_RESULT ok=" in stdout:
+                                _write_date_flag(".eod_last_ok_date", today_str)
+                                last_token_skip_ts = 0.0
+                                last_token_skip_mtime = 0.0
 
             # JOB 1b: Monthly RSI2 snapshot (DBeaver / Excel) — own IST clock, default 15:00 pre-close; not tied to EOD
             snap_enabled = os.getenv(

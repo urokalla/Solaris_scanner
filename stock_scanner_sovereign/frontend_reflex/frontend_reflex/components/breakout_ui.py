@@ -43,6 +43,7 @@ def breakout_sidebar():
         "RST",
     ]
     mrs_grid_options = ["ALL", "TREND_OK"]
+    wmrs_slope_options = ["ALL", "POS"]
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
         rx.box(
@@ -138,9 +139,40 @@ def breakout_sidebar():
                 margin_right="15px",
                 height="32px",
             ),
+            rx.text("W_MRS SLOPE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+            rx.select(
+                wmrs_slope_options,
+                value=BreakoutState.filter_wmrs_slope,
+                on_change=BreakoutState.set_filter_wmrs_slope,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                margin_left="15px",
+                margin_right="15px",
+                height="32px",
+            ),
             rx.text("LAST TAG PREFIX", size="1", color="#888888", padding_top="8px", padding_left="15px"),
             rx.select(
-                ["ALL", "B", "E9CT", "ET9DNWF21C", "E21C", "RST"],
+                [
+                    "ALL",
+                    "B",
+                    "E9CT",
+                    "E9CT1",
+                    "E9CT2",
+                    "E9CT3",
+                    "E9CT4",
+                    "E9CT5",
+                    "E9CT6",
+                    "E9CT7",
+                    "E9CT8",
+                    "E9CT9",
+                    "ET9DNWF21C",
+                    "E21C",
+                    "RST",
+                ],
                 value=BreakoutState.filter_m_rsi2,
                 on_change=BreakoutState.set_filter_m_rsi2,
                 color="white",

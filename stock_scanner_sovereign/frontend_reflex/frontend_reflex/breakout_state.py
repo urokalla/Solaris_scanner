@@ -16,6 +16,7 @@ class BreakoutState(rx.State):
     filter_min_price, filter_max_price = "0.0", "100000.0"
     filter_brk_stage = "ALL"
     filter_mrs_grid: str = "ALL"
+    filter_wmrs_slope: str = "ALL"
     preset_mode: str = "ALL"
     sort_sidecar_key: str = ""
     sort_sidecar_desc: bool = False
@@ -137,6 +138,9 @@ class BreakoutState(rx.State):
 
     def set_filter_mrs_grid(self, v: str):
         self.filter_mrs_grid, self.current_page = (v or "ALL").strip().upper(), 1
+
+    def set_filter_wmrs_slope(self, v: str):
+        self.filter_wmrs_slope, self.current_page = (v or "ALL").strip().upper(), 1
 
     def set_filter_m_rsi2(self, v: str):
         self.filter_m_rsi2, self.current_page = (v or "ALL"), 1

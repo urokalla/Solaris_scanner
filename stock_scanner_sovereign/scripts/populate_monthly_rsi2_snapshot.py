@@ -22,12 +22,13 @@ import argparse
 import os
 import sys
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
-
-from psycopg2.extras import execute_values
 
 SOV = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SOV)
+
+from utils.zone_info import ZoneInfo  # noqa: E402
+
+from psycopg2.extras import execute_values
 
 import pandas as pd
 

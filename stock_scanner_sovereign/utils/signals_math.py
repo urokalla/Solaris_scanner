@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from utils.zone_info import ZoneInfo
 
 import numpy as np
 

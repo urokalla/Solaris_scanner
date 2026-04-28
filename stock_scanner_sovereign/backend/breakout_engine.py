@@ -1,18 +1,124 @@
 import threading, time, os, numpy as np
+from datetime import datetime
+from utils.zone_info import ZoneInfo
 from utils.pipeline_bridge import PipelineBridge; from utils.ring_buffer import RingBuffer
 from .database import DatabaseManager; from utils.constants import BENCHMARK_MAP, SIGNAL_DTYPE
 from .breakout_logic import (
     TAG_ET9_WAIT_F21C,
+    WEEKLY_CYCLE_PARITY_VERSION,
     initial_sync_helper,
     main_loop_helper,
     format_ui_row,
     compute_breakout_setup_score_row,
     _update_minimal_cycle_state,
     _update_minimal_cycle_state_weekly,
+    _update_live_timing_breakout_status,
     _decode_shm_grid_status,
 )
 
 from .scanner_shm import SHMBridge
+
+_IST_TIMING = ZoneInfo("Asia/Kolkata")
+
+
+def _ltp_pct_vs_anchor(x: dict, anchor_key: str) -> float:
+    """Sort key: percent move LTP vs anchor (B close or first-cross LTP)."""
+    try:
+        a = float(x.get(anchor_key) or 0.0)
+        l = float(x.get("ltp") or 0.0)
+        if a > 0.0 and l > 0.0:
+            return (l / a - 1.0) * 100.0
+    except (TypeError, ValueError):
+        pass
+    return float("-inf")
+
+
+def _timing_today_iso() -> str:
+    return datetime.now(_IST_TIMING).date().isoformat()
+
+
+def _timing_iso_from_ts(ts_raw) -> str:
+    try:
+        ts = float(ts_raw or 0.0)
+        if ts <= 0.0:
+            return ""
+        return datetime.fromtimestamp(ts, tz=_IST_TIMING).date().isoformat()
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _timing_live_daily(d: dict, today_iso: str) -> bool:
+    """Intraday: first cross today pending, still above daily Donchian."""
+    brk = float(d.get("brk_lvl") or 0.0)
+    ltp = float(d.get("ltp") or 0.0)
+    if brk <= 0 or ltp <= brk:
+        return False
+    if str(d.get("cb_pending_day_d") or "") != today_iso:
+        return False
+    return bool(str(d.get("cb_pending_tag_d") or "").strip()) and str(
+        d.get("timing_last_tag") or ""
+    ).strip().upper().startswith("C")
+
+
+def _timing_sustained_daily(d: dict, today_iso: str) -> bool:
+    """Today's daily live breakout still holding above brk_lvl: live pending C* or sustained C*S today."""
+    brk = float(d.get("brk_lvl") or 0.0)
+    ltp = float(d.get("ltp") or 0.0)
+    if brk <= 0 or ltp <= brk:
+        return False
+    ttag = str(d.get("timing_last_tag") or "").strip().upper()
+    if not ttag.startswith("C"):
+        return False
+    if ttag.endswith("S") and _timing_iso_from_ts(d.get("timing_last_event_ts")) == today_iso:
+        return True
+    return _timing_live_daily(d, today_iso)
+
+
+def _timing_sustained_weekly(d: dict, today_iso: str) -> bool:
+    """Weekly sustained breakout: C*S on weekly tag today, or live weekly pending above brk_lvl_w."""
+    brk = float(d.get("brk_lvl_w") or 0.0)
+    ltp = float(d.get("ltp") or 0.0)
+    if brk <= 0 or ltp <= brk:
+        return False
+    ttag = str(d.get("timing_last_tag_w") or "").strip().upper()
+    if not ttag.startswith("C"):
+        return False
+    if ttag.endswith("S") and _timing_iso_from_ts(d.get("timing_last_event_ts_w")) == today_iso:
+        return True
+    return bool(str(d.get("cb_pending_week_w") or "").strip()) and bool(str(d.get("cb_pending_tag_w") or "").strip())
+
+
+def _timing_not_sustained_daily(d: dict, today_iso: str) -> bool:
+    """Today had a daily live breakout context, but price is now back at/below brk_lvl."""
+    brk = float(d.get("brk_lvl") or 0.0)
+    ltp = float(d.get("ltp") or 0.0)
+    if brk <= 0.0 or ltp > brk:
+        return False
+    # Explicit marker (set on failed sustain finalize).
+    if str(d.get("cb_not_sustained_day_d") or "") == today_iso:
+        return True
+    # Intraday fallback: breakout happened today (captured), now dropped below level.
+    if str(d.get("cb_live_entry_day_d") or "") == today_iso:
+        return True
+    # Additional fallback for rows without live_entry carry: timing event today + C* family.
+    ttag = str(d.get("timing_last_tag") or "").strip().upper()
+    if ttag.startswith("C") and _timing_iso_from_ts(d.get("timing_last_event_ts")) == today_iso:
+        return True
+    return False
+
+
+def _timing_e_family(d: dict) -> bool:
+    """Strict E-family timing visibility: only CE* timing tags."""
+    td = str(d.get("timing_last_tag") or "").strip().upper()
+    tw = str(d.get("timing_last_tag_w") or "").strip().upper()
+    return td.startswith("CE") or tw.startswith("CE")
+
+
+def _timing_e_sustained(d: dict) -> bool:
+    """Only explicit CE*S timing tags (daily or weekly)."""
+    td = str(d.get("timing_last_tag") or "").strip().upper()
+    tw = str(d.get("timing_last_tag_w") or "").strip().upper()
+    return (td.startswith("CE") and td.endswith("S")) or (tw.startswith("CE") and tw.endswith("S"))
 
 
 def _is_index_row(sym) -> bool:
@@ -148,54 +254,6 @@ def _sidecar_preset_keep(d: dict, preset_norm: str) -> bool:
     if preset_norm == "HIGH10_LITE":
         return chp >= 5.0
     return True
-
-
-def _infer_b_count_for_fallback(d: dict) -> int:
-    try:
-        cnt = int(d.get("b_count", 0) or 0)
-    except Exception:
-        cnt = 0
-    if cnt > 0:
-        return cnt
-    t = str(d.get("last_tag") or "").strip().upper()
-    if not t.startswith("B"):
-        return 0
-    digits = []
-    for ch in t[1:]:
-        if ch.isdigit():
-            digits.append(ch)
-        else:
-            break
-    if not digits:
-        return 1
-    try:
-        return max(1, int("".join(digits)))
-    except Exception:
-        return 1
-
-
-def _infer_b_count_w_for_fallback(d: dict) -> int:
-    try:
-        cnt = int(d.get("b_count_w", 0) or 0)
-    except Exception:
-        cnt = 0
-    if cnt > 0:
-        return cnt
-    t = str(d.get("last_tag_w") or "").strip().upper()
-    if not t.startswith("B"):
-        return 0
-    digits = []
-    for ch in t[1:]:
-        if ch.isdigit():
-            digits.append(ch)
-        else:
-            break
-    if not digits:
-        return 1
-    try:
-        return max(1, int("".join(digits)))
-    except Exception:
-        return 1
 
 
 class BreakoutScanner:
@@ -356,20 +414,31 @@ class BreakoutScanner:
             "b_count_w", "e9t_count_w", "e21c_count_w", "rst_count_w",
             "last_tag_w", "last_event_ts_w", "cycle_last_bar_key_w", "brk_lvl_w",
             "brk_b_anchor_close_w", "brk_b_anchor_ts_w",
+            "_wcycle_v",
         )
         for d in data:
             lt = str(d.get("last_tag") or "").strip()
             ltw = str(d.get("last_tag_w") or "").strip()
             brk_ok = float(d.get("brk_lvl") or 0.0) > 0.0
             brk_w_ok = float(d.get("brk_lvl_w") or 0.0) > 0.0
-            if lt not in ("", "—") and ltw not in ("", "—") and brk_ok and brk_w_ok:
+            _wcv = int(d.get("_wcycle_v") or 0)
+            _need_cycle_refresh = _wcv < WEEKLY_CYCLE_PARITY_VERSION
+            if (
+                lt not in ("", "—")
+                and ltw not in ("", "—")
+                and brk_ok
+                and brk_w_ok
+                and not _need_cycle_refresh
+            ):
                 continue
             sym = str(d.get("symbol") or "").strip()
             if not sym:
                 continue
             try:
                 last_try = float(self._cycle_backfill_ts.get(sym, 0.0))
-                if now_ts - last_try < 180.0:
+                # Throttle random backfill; only bypass when an *old* stamp (v>=1) must be upgraded.
+                _bypass_backfill_throttle = _need_cycle_refresh and _wcv > 0
+                if now_ts - last_try < 180.0 and not _bypass_backfill_throttle:
                     continue
                 self._cycle_backfill_ts[sym] = now_ts
                 buf = self.buffers.get(sym)
@@ -462,31 +531,63 @@ class BreakoutScanner:
                         d["grid_mrs_status"] = _decode_shm_grid_status(row["status"])
                 except Exception:
                     pass
+                try:
+                    if mode == "timing" and "heartbeat" in row.dtype.names:
+                        d["_shm_quote_ts"] = float(row["heartbeat"])
+                except Exception:
+                    pass
+                # Keep stored rows warm with the same SHM snapshot used by this response.
+                # Without this, `self.results` can stay at ltp=0 while UI rows are live,
+                # which also hurts timing carry-over diagnostics / probes.
+                try:
+                    with self.lock:
+                        stored = self.results.get(sym)
+                        if stored is not None:
+                            for k in ("ltp", "mrs", "rv", "change_pct", "rs_rating", "grid_mrs_status"):
+                                if k in d:
+                                    stored[k] = d[k]
+                except Exception:
+                    pass
             except Exception:
                 pass
-        # Timing fallback runs ONLY for the /breakout-timing page.
-        # /breakout (Strategy) shows confirmed bars only — never CBBUY.
+        # /breakout-timing: same live timing helper as main_loop (avoids duplicate CBBUY + wall-clock ts).
         if mode == "timing":
+            _now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
             for d in data:
                 try:
-                    ltp = float(d.get("ltp", 0.0) or 0.0)
-                    brk = float(d.get("brk_lvl", 0.0) or 0.0)
-                    tag = str(d.get("timing_last_tag") or d.get("last_tag") or "").strip().upper()
-                    if (not tag or tag in ("—", "LOCKED")) and brk > 0 and ltp > brk:
-                        nxt = _infer_b_count_for_fallback(d) + 1
-                        d["timing_last_tag"] = "CBBUY" if nxt <= 1 else f"CB{nxt}BUY"
-                        d["timing_last_event_ts"] = float(time.time())
-                        d["cb_pending_day_d"] = "fallback_live"
-                        d["timing_state_name"] = "LIVE BREAKOUT"
-
-                    brk_w = float(d.get("brk_lvl_w", 0.0) or 0.0)
-                    tag_w = str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "").strip().upper()
-                    if (not tag_w or tag_w in ("—", "LOCKED")) and brk_w > 0 and ltp > brk_w:
-                        nxt_w = _infer_b_count_w_for_fallback(d) + 1
-                        d["timing_last_tag_w"] = "CBBUY" if nxt_w <= 1 else f"CB{nxt_w}BUY"
-                        d["timing_last_event_ts_w"] = float(time.time())
-                        d["cb_pending_week_w"] = "fallback_live"
-                        d["timing_state_name_w"] = "LIVE BREAKOUT"
+                    _qts = d.pop("_shm_quote_ts", None)
+                    _update_live_timing_breakout_status(
+                        d, float(d.get("ltp", 0.0) or 0.0), _now_ist, _qts
+                    )
+                    # Persist timing overlay state back to scanner memory so pending/confirm
+                    # state is carried across polls (not recomputed from scratch each request).
+                    try:
+                        sym = str(d.get("symbol") or "")
+                        with self.lock:
+                            stored = self.results.get(sym)
+                            if stored is not None:
+                                for k in (
+                                    "timing_last_tag", "timing_last_event_ts",
+                                    "timing_last_tag_w", "timing_last_event_ts_w",
+                                    "cb_pending_day_d", "cb_pending_tag_d", "cb_pending_ts_d",
+                                    "cb_pending_prev_tag_d",
+                                    "cb_sustain_base_tag_d",
+                                    "cb_last_confirm_day_d", "cb_count_d",
+                                    "cb_live_entry_px_d", "cb_live_entry_day_d",
+                                    "cb_pending_week_w", "cb_pending_tag_w", "cb_pending_ts_w",
+                                    "cb_pending_prev_tag_w",
+                                    "cb_sustain_base_tag_w",
+                                    "cb_last_confirm_week_w", "cb_count_w",
+                                    "cb_live_entry_px_w", "cb_live_entry_week_w",
+                                    "cb_prev_day_d", "cb_prev_ltp_d",
+                                    "cb_prev_week_w", "cb_prev_ltp_w",
+                                    "cb_not_sustained_day_d", "cb_not_sustained_ts_d",
+                                    "cb_not_sustained_week_w", "cb_not_sustained_ts_w",
+                                ):
+                                    if k in d:
+                                        stored[k] = d[k]
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         sq = (kw.get("search") or "").upper()
@@ -532,7 +633,20 @@ class BreakoutScanner:
         if preset_norm not in ("ALL", "", "NONE"):
             data = [d for d in data if _sidecar_preset_keep(d, preset_norm)]
         tf = (kw.get("timing_filter") or "ALL").strip().upper()
-        if tf == "D_BRK":
+        _today_iso = _timing_today_iso()
+        if tf == "LIVE":
+            data = [d for d in data if _timing_live_daily(d, _today_iso)]
+        elif tf == "SUSTAINED":
+            data = [d for d in data if _timing_sustained_daily(d, _today_iso)]
+        elif tf in ("SUSTAINED_W", "W_SUSTAINED"):
+            data = [d for d in data if _timing_sustained_weekly(d, _today_iso)]
+        elif tf == "NOT_SUSTAINED":
+            data = [d for d in data if _timing_not_sustained_daily(d, _today_iso)]
+        elif tf in ("E_TIMING", "E_FAMILY"):
+            data = [d for d in data if _timing_e_family(d)]
+        elif tf in ("E_SUSTAINED", "E_S"):
+            data = [d for d in data if _timing_e_sustained(d)]
+        elif tf == "D_BRK":
             data = [
                 d
                 for d in data
@@ -571,6 +685,24 @@ class BreakoutScanner:
             data.sort(key=lambda x: float(x.get("rv", 0) or 0), reverse=sort_desc)
         elif sort_key in ("wmrs", "w_mrs", "mrs"):
             data.sort(key=lambda x: float(x.get("mrs", 0) or 0), reverse=sort_desc)
+        elif sort_key in ("last_tag_d", "timing_last_tag_d"):
+            data.sort(
+                key=lambda x: str(x.get("timing_last_tag") or x.get("last_tag") or "").upper(),
+                reverse=sort_desc,
+            )
+        elif sort_key in ("last_tag_w", "timing_last_tag_w"):
+            data.sort(
+                key=lambda x: str(x.get("timing_last_tag_w") or x.get("last_tag_w") or "").upper(),
+                reverse=sort_desc,
+            )
+        elif sort_key == "pct_from_b_d":
+            data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "brk_b_anchor_close"), reverse=sort_desc)
+        elif sort_key == "pct_live_d":
+            data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "cb_live_entry_px_d"), reverse=sort_desc)
+        elif sort_key == "pct_from_b_w":
+            data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "brk_b_anchor_close_w"), reverse=sort_desc)
+        elif sort_key == "pct_live_w":
+            data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "cb_live_entry_px_w"), reverse=sort_desc)
         elif sort_key == "mrs_grid":
             data.sort(key=_mrs_grid_sort_priority, reverse=sort_desc)
         elif sort_key in ("last_ts", "last_event", "event_d", "when_d"):

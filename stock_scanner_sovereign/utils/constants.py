@@ -41,6 +41,8 @@ BENCHMARK_MAP = {
     "Nifty Smallcap 100": "NSE:NIFTYSMLCAP100-INDEX",
     "Nifty Smallcap 250": "NSE:NIFTY500-INDEX",
     "SME List": "NSE:NIFTY500-INDEX",
+    # Nifty IPO: member list from NSE; RS bench same as broad equities until a dedicated index exists.
+    "Nifty IPO": "NSE:NIFTY500-INDEX",
     "Microcap 250": "NSE:NIFTYMICROCAP250-INDEX",
     "Bank Nifty": "NSE:NIFTYBANK-INDEX",
     "All NSE Stocks": "NSE:NIFTY500-INDEX"
@@ -57,6 +59,7 @@ SYMBOL_GROUPS = {
     "Nifty Smallcap 100": "data/nifty_smallcap100.csv",
     "Nifty Smallcap 250": "data/nifty_smallcap250.csv",
     "SME List": "data/sme_list.csv",
+    "Nifty IPO": "data/ind_niftyipo_list.csv",
     "Microcap 250": "data/microcap250.csv",
     "Bank Nifty": "data/banknifty.csv",
     "All NSE Stocks": "data/NSE_EQ.csv",
@@ -75,6 +78,7 @@ UNIVERSE_ID_BY_DISPLAY = {
     "Nifty Smallcap 100": "SMALLCAP_100",
     "Nifty Smallcap 250": "SMALLCAP_250",
     "SME List": "SME_LIST",
+    "Nifty IPO": "NIFTY_IPO",
     "Microcap 250": "MICROCAP_250",
     "Bank Nifty": "BANK_NIFTY",
     "All NSE Stocks": "ALL_NSE",

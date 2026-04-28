@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
 from typing import Literal
-from zoneinfo import ZoneInfo
+from utils.zone_info import ZoneInfo
 
 import numpy as np
 import pandas as pd

@@ -652,7 +652,8 @@ class MasterScanner:
     def _maybe_roll_new_trading_day_ist(self):
         """Clear BUY NOW latch on each new calendar day (Asia/Kolkata)."""
         from datetime import datetime
-        from zoneinfo import ZoneInfo
+
+        from utils.zone_info import ZoneInfo
 
         d = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         if self._last_ist_trading_date is None:
@@ -679,7 +680,8 @@ class MasterScanner:
     def _snapshot_eod_mrs_prev_day_if_due(self):
         """After ~15:30 IST, once per day: mrs_prev_day <- mrs for next session's column + TRENDING rules."""
         from datetime import datetime
-        from zoneinfo import ZoneInfo
+
+        from utils.zone_info import ZoneInfo
 
         IST = ZoneInfo("Asia/Kolkata")
         now = datetime.now(IST)
@@ -1768,6 +1770,37 @@ class MasterScanner:
                 self.math.backfill_vol_avg_from_prices(self.db)
             except Exception as e:
                 logger.warning("vol_avg Postgres backfill skipped: %s", e)
+            try:
+                # Warm-start with last persisted live prices so post-session restarts do not stay
+                # on stale parquet closes until the next EOD parquet sync.
+                lp_map = self.db.get_live_last_price_map(self.symbols)
+                if lp_map:
+                    hit = 0
+                    for i, sym in enumerate(self.symbols):
+                        lp = lp_map.get(sym)
+                        if lp is None:
+                            continue
+                        try:
+                            v = float(lp)
+                        except (TypeError, ValueError):
+                            continue
+                        if np.isfinite(v) and v > 0:
+                            self.math.price_matrix_w[i, -1] = v
+                            self.math.price_matrix_d[i, -1] = v
+                            self.math.price_matrix_d_long[i, -1] = v
+                            hit += 1
+                    if hit > 0:
+                        try:
+                            bi = int(self.math.bench_idx) if self.math.bench_idx is not None else -1
+                            if 0 <= bi < len(self.symbols):
+                                self.math.bench_prices_w = self.math.price_matrix_w[bi]
+                                self.math.bench_prices_d = self.math.price_matrix_d[bi]
+                        except Exception:
+                            pass
+                        mrs_w, mrs_d, ratings = self.math.calculate_rs()
+                        logger.info("Warm-start from live_state.last_price applied: %s symbols", hit)
+            except Exception as e:
+                logger.warning("Warm-start live_state.last_price skipped: %s", e)
             
             n = len(self.symbols)
             logger.info(f"✅ Baseline synchronization successful: {n} symbols processed.")
