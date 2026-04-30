@@ -703,6 +703,7 @@ class BreakoutScanner:
             _need_cycle_refresh = _wcv < WEEKLY_CYCLE_PARITY_VERSION
             _need_cycle_replay = _cv < CYCLE_REPLAY_VERSION
             _tag_u = str(lt).strip().upper()
+            _timing_u = str(d.get("timing_last_tag") or "").strip().upper()
             _core_inconsistent = (
                 _tag_u not in ("", "—", "RST")
                 and int(d.get("cycle_state") or 0) == 0
@@ -710,6 +711,17 @@ class BreakoutScanner:
                 and int(d.get("e9t_count") or 0) == 0
                 and int(d.get("e21c_count") or 0) == 0
             )
+            # Edge case: core cycle got stuck at RST while timing already shows CB progression.
+            # Treat this as inconsistent so we force a parquet replay for this symbol.
+            if (
+                _tag_u == "RST"
+                and _timing_u.startswith("CB")
+                and int(d.get("cycle_state") or 0) == 0
+                and int(d.get("b_count") or 0) == 0
+                and int(d.get("e9t_count") or 0) == 0
+                and int(d.get("e21c_count") or 0) == 0
+            ):
+                _core_inconsistent = True
             if _core_inconsistent:
                 _need_cycle_replay = True
             # Persist used to omit brk_b_anchor_level(_w); rows could have tags + brk_lvl(_w) but
@@ -773,6 +785,22 @@ class BreakoutScanner:
                                 buf.append(rr)
                         hv = buf.get_ordered_view()
                 if hv is not None and len(hv) >= 6:
+                    if _force_full_hist:
+                        # Replay must recompute from history even when a stale bar-key is already present.
+                        d["cycle_last_bar_key"] = ""
+                        d["cycle_last_bar_key_w"] = ""
+                        d["last_tag"] = "—"
+                        d["last_tag_w"] = "—"
+                        d["last_event_ts"] = 0.0
+                        d["last_event_ts_w"] = 0.0
+                        d["cycle_state"] = 0
+                        d["cycle_state_w"] = 0
+                        d["b_count"] = 0
+                        d["e9t_count"] = 0
+                        d["e21c_count"] = 0
+                        d["b_count_w"] = 0
+                        d["e9t_count_w"] = 0
+                        d["e21c_count_w"] = 0
                     _update_minimal_cycle_state(d, hv, don_len=don_win)
                     _update_minimal_cycle_state_weekly(d, hv, don_len=don_win)
                     d["_cycle_replay_v"] = CYCLE_REPLAY_VERSION

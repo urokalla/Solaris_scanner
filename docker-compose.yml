@@ -173,16 +173,16 @@ services:
       - SIDECAR_MRS_SIGNAL_ENABLED=${SIDECAR_MRS_SIGNAL_ENABLED:-0}
       # Pace the main loop: cycle tags only change on bar close, so sub-second refresh is wasted CPU.
       - SIDECAR_LOOP_SLEEP_SEC=${SIDECAR_LOOP_SLEEP_SEC:-1.5}
-      - SIDECAR_SYNC_WORKERS=${SIDECAR_SYNC_WORKERS:-8}
-      - SIDECAR_MAX_TASKS_PER_LOOP=${SIDECAR_MAX_TASKS_PER_LOOP:-30}
+      - SIDECAR_SYNC_WORKERS=${SIDECAR_SYNC_WORKERS:-12}
+      - SIDECAR_MAX_TASKS_PER_LOOP=${SIDECAR_MAX_TASKS_PER_LOOP:-40}
       # Udai Pine daily OHLCV refresh cadence (lower = closer to live Pine, higher = less CPU).
       - UDAI_REFRESH_SEC=${UDAI_REFRESH_SEC:-25}
       # Weekly RVCR recompute cache cadence.
       - MRS_RVCR_WEEKLY_REFRESH_SEC=${MRS_RVCR_WEEKLY_REFRESH_SEC:-35}
     working_dir: /app/stock_scanner_sovereign
     command: ["python3", "sidecar.py"]
-    cpus: "1.0"
-    mem_limit: 896m
+    cpus: "2.0"
+    mem_limit: 1536m
     networks:
       - sovereign_net
 
