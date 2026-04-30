@@ -8,8 +8,8 @@ def breakout_header():
                 rx.text("SOLARIS • BREAKOUT STRATEGY", size="4", color="#00FF00", font_weight="bold"),
                 rx.text("ISOLATED SIDECAR ENGINE", size="1", color="#D1D1D1"),
                 rx.link(
-                    "Open Breakout clock (daily/weekly event times →)",
-                    href="/breakout-timing",
+                    "Open Breakout clock (daily →)",
+                    href="/breakout-clock-daily",
                     color="#00E5FF",
                     font_size="11px",
                     padding_top="4px",

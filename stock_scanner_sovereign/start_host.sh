@@ -21,4 +21,5 @@ sudo systemctl restart solaris
 echo "✅ Solaris Scanner is running in the background!"
 echo "📡 Dashboard: http://localhost:3000"
 echo "🛰️  Sidecar:   http://localhost:3000/breakout"
+echo "⏱️  Clock D/W: http://localhost:3000/breakout-clock-daily  |  http://localhost:3000/breakout-clock-weekly"
 echo "🔍 Check logs with: journalctl -u solaris -f"

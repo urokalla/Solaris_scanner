@@ -82,6 +82,7 @@ def main() -> int:
         sort_desc=False,
         timing_filter="ALL",
         mode="timing",
+        clock_timeframe="daily",
     )
     rows = view.get("results") or []
     ui = next((r for r in rows if needle in str(r.get("symbol", "")).upper()), None)
@@ -100,6 +101,7 @@ def main() -> int:
         "last_tag_w",
         "last_event_ts",
         "last_event_ts_w",
+        "brk_b_anchor_level",
         "brk_b_anchor_close",
         "brk_b_anchor_ts",
         "brk_b_anchor_close_w",
@@ -132,7 +134,7 @@ def main() -> int:
     print()
     print("--- manual % (same formulas as format_ui_row) ---")
     print(f"  % FROM B (D):   LTP vs brk_b_anchor_close  → {_pct_move(raw.get('brk_b_anchor_close'), ltp)}")
-    print(f"  SINCE BRK (D):  LTP vs cb_live_entry_px_d  → {_pct_move(raw.get('cb_live_entry_px_d'), ltp)}")
+    print(f"  SINCE BRK (D):  LTP vs brk_b_anchor_level → {_pct_move(raw.get('brk_b_anchor_level'), ltp)}")
     print(f"  % FROM B (W):   LTP vs brk_b_anchor_close_w → {_pct_move(raw.get('brk_b_anchor_close_w'), ltp)}")
     print(f"  SINCE BRK (W):  LTP vs cb_live_entry_px_w  → {_pct_move(raw.get('cb_live_entry_px_w'), ltp)}")
     print(f"  ltp > brk_lvl (D)? {float(ltp or 0) > float(raw.get('brk_lvl') or 0)}")

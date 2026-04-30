@@ -106,10 +106,11 @@ def download_excel_handler(self):
 
 def download_timing_excel_handler(self):
     """
-    Export /breakout-timing rows (timing tags, WHEN IST, SINCE BRK %) with current filters/sort.
+    Export breakout clock rows (timing tags, WHEN IST, SINCE BRK %) with current filters/sort.
     """
     scanner = get_breakout_scanner(universe=self.universe, role="timing")
     scanner.update_universe(self.universe, None)
+    _ctf = str(getattr(self, "clock_timeframe", "") or "").strip().lower()
     view = scanner.get_ui_view(
         page=1,
         page_size=500_000,
@@ -124,6 +125,7 @@ def download_timing_excel_handler(self):
         sort_desc=self.sort_timing_desc,
         timing_filter=self.timing_filter,
         mode="timing",
+        clock_timeframe=_ctf,
     )
     rows = view.get("results") or []
     if not rows:
@@ -131,45 +133,71 @@ def download_timing_excel_handler(self):
 
     slim = []
     for r in rows:
-        slim.append(
-            {
-                "symbol": r.get("symbol"),
-                "setup_score": r.get("setup_score"),
-                "ltp": r.get("ltp"),
-                "chp": r.get("chp"),
-                "rs_rating": r.get("rs_rating"),
-                "rvol": r.get("rv"),
-                "mrs_w": r.get("mrs_weekly"),
-                "last_tag_d": r.get("timing_last_tag"),
-                "when_d_ist": r.get("timing_last_event_dt"),
-                "pct_live_d": r.get("brk_move_live_pct"),
-                "b_bar_d_ist": r.get("brk_b_anchor_dt"),
-                "last_tag_w": r.get("timing_last_tag_w"),
-                "when_w_ist": r.get("timing_last_event_dt_w"),
-                "pct_live_w": r.get("brk_move_live_pct_w"),
-                "b_bar_w_ist": r.get("brk_b_anchor_dt_w"),
-            }
-        )
+        base = {
+            "symbol": r.get("symbol"),
+            "setup_score": r.get("setup_score"),
+            "ltp": r.get("ltp"),
+            "chp": r.get("chp"),
+            "rs_rating": r.get("rs_rating"),
+            "rvol": r.get("rv"),
+            "mrs_w": r.get("mrs_weekly"),
+        }
+        if _ctf == "weekly":
+            base.update(
+                {
+                    "last_tag_w": r.get("timing_last_tag_w"),
+                    "when_w_ist": r.get("timing_last_event_dt_w"),
+                    "pct_live_w": r.get("brk_move_live_pct_w"),
+                    "b_bar_w_ist": r.get("brk_b_anchor_dt_w"),
+                }
+            )
+            slim.append(base)
+        else:
+            base.update(
+                {
+                    "last_tag_d": r.get("last_tag"),
+                    "live_struct_d": r.get("live_struct_d"),
+                    "when_d_ist": r.get("last_event_dt"),
+                    "pct_live_d": r.get("brk_move_live_pct"),
+                    "b_bar_d_ist": r.get("brk_b_anchor_dt"),
+                }
+            )
+            slim.append(base)
     df = pd.DataFrame(slim)
-    df.columns = [
-        "SYMBOL",
-        "SETUP_SCORE",
-        "PRICE",
-        "CHG_PCT",
-        "RS",
-        "RVOL",
-        "W_MRS",
-        "LAST_TAG_D",
-        "WHEN_D_IST",
-        "SINCE BRK % (D)",
-        "B_BAR_DATE_D_IST",
-        "LAST_TAG_W",
-        "WHEN_W_IST",
-        "SINCE BRK % (W)",
-        "B_BAR_DATE_W_IST",
-    ]
+    if _ctf == "weekly":
+        df.columns = [
+            "SYMBOL",
+            "SETUP_SCORE",
+            "PRICE",
+            "CHG_PCT",
+            "RS",
+            "RVOL",
+            "W_MRS",
+            "LAST_TAG_W",
+            "WHEN_W_IST",
+            "SINCE BRK % (W)",
+            "B_BAR_DATE_W_IST",
+        ]
+        sheet = "BreakoutClockWeekly"
+        fname = f"breakout_clock_weekly_{self.universe.replace(' ', '_')}_{time.strftime('%Y%m%d_%H%M')}.xlsx"
+    else:
+        df.columns = [
+            "SYMBOL",
+            "SETUP_SCORE",
+            "PRICE",
+            "CHG_PCT",
+            "RS",
+            "RVOL",
+            "W_MRS",
+            "LAST_TAG_D",
+            "LIVE_STRUCT_D",
+            "WHEN_D_IST",
+            "SINCE BRK % (D)",
+            "B_BAR_DATE_D_IST",
+        ]
+        sheet = "BreakoutClockDaily"
+        fname = f"breakout_clock_daily_{self.universe.replace(' ', '_')}_{time.strftime('%Y%m%d_%H%M')}.xlsx"
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="BreakoutTiming")
-    fname = f"breakout_timing_{self.universe.replace(' ', '_')}_{time.strftime('%Y%m%d_%H%M')}.xlsx"
+        df.to_excel(writer, index=False, sheet_name=sheet)
     return rx.download(data=out.getvalue(), filename=fname)

@@ -333,18 +333,22 @@ class State(rx.State):
         except Exception as e: return rx.window_alert(f"Export Error: {e}")
 
     async def _sync_breakout_sidecars(self, universe: str):
-        """Keep shared breakout engine + Breakout / Breakout-timing Reflex state aligned."""
+        """Keep shared breakout engine + Breakout / Breakout clock Reflex states aligned."""
         from .breakout_engine_manager import get_breakout_scanner
         from .breakout_state import BreakoutState
-        from .breakout_timing_state import BreakoutTimingState
+        from .breakout_timing_state import BreakoutTimingDailyState, BreakoutTimingWeeklyState
 
         get_breakout_scanner(universe=universe).update_universe(universe, None)
+        get_breakout_scanner(universe=universe, role="timing").update_universe(universe, None)
         bs = await self.get_state(BreakoutState)
-        bts = await self.get_state(BreakoutTimingState)
+        btd = await self.get_state(BreakoutTimingDailyState)
+        btw = await self.get_state(BreakoutTimingWeeklyState)
         async with bs:
             bs.universe = universe
-        async with bts:
-            bts.universe = universe
+        async with btd:
+            btd.universe = universe
+        async with btw:
+            btw.universe = universe
 
     async def open_sidecar_full_universe(self):
         """Open breakout sidecar with the full Nifty list for the current main universe (no profile subset)."""
@@ -353,12 +357,19 @@ class State(rx.State):
         await self._sync_breakout_sidecars(u)
         return rx.redirect("/breakout", is_external=True)
 
-    async def open_breakout_timing_full_universe(self):
-        """Open breakout clock with the full Nifty list for the current main universe (no profile subset)."""
+    async def open_breakout_clock_daily_full_universe(self):
+        """Open daily breakout clock with the full list for the current main universe."""
         async with self:
             u = self.universe
         await self._sync_breakout_sidecars(u)
-        return rx.redirect("/breakout-timing", is_external=True)
+        return rx.redirect("/breakout-clock-daily", is_external=True)
+
+    async def open_breakout_clock_weekly_full_universe(self):
+        """Open weekly breakout clock with the full list for the current main universe."""
+        async with self:
+            u = self.universe
+        await self._sync_breakout_sidecars(u)
+        return rx.redirect("/breakout-clock-weekly", is_external=True)
 
     def open_tradingview(self, symbol: str):
         """Open TradingView chart (NSE) in a new tab."""

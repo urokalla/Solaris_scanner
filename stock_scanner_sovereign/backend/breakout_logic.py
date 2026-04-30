@@ -67,6 +67,17 @@ def _nse_ist_cash_eod_ts_for_event_bar_ts(ts: float) -> float:
     return _nse_ist_cash_eod_ts_for_session_date(d)
 
 
+def _daily_struct_event_ts(ts_raw: float) -> float:
+    """Daily structural cycle stamps: NSE cash EOD (15:30 IST) for that bar’s IST session day."""
+    try:
+        t = float(ts_raw or 0.0)
+        if t <= 0.0 or not bool(np.isfinite(t)):
+            return 0.0
+        return _nse_ist_cash_eod_ts_for_event_bar_ts(t)
+    except Exception:
+        return float(ts_raw or 0.0)
+
+
 def _bar_date_key_from_ts(ts: float) -> str:
     try:
         d = _nse_ist_session_date_for_when(float(ts))
@@ -692,14 +703,19 @@ def _update_minimal_cycle_state(
         elif last_date > now_date:
             i = len(hv) - 2
         else:
-            # last_date == now_date: defer partial bar unless Friday after cash (IST).
+            # last_date == now_date: last row is today's session — defer until post-EOD IST so
+            # LAST_TAG D can move same evening once parquet has the closed bar (not after midnight).
             i = len(hv) - 2
-            if settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_ENABLED and now_dt.weekday() == 4:
-                if (now_dt.hour, now_dt.minute) >= (
-                    settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_HOUR,
-                    settings.CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE,
-                ):
-                    i = len(hv) - 1
+            if (
+                settings.STRUCTURAL_SAMEDAY_AFTER_EOD_ENABLED
+                and now_dt.weekday() < 5
+                and (now_dt.hour, now_dt.minute)
+                >= (
+                    settings.STRUCTURAL_SAMEDAY_AFTER_EOD_IST_HOUR,
+                    settings.STRUCTURAL_SAMEDAY_AFTER_EOD_IST_MINUTE,
+                )
+            ):
+                i = len(hv) - 1
         # Weekly OHLC: each row is an ISO week; last row updates intraday. TradingView
         # weekly/confirmed = last *closed* week, not the developing week — same as
         # deferring an incomplete bar. Do not i=len-1 on the in-progress last week
@@ -764,7 +780,7 @@ def _update_minimal_cycle_state(
                 if st_state > 0 and st_below21 >= 2:
                     st_rst += 1
                     st_state = 0; st_b = 0; st_e9t = 0; st_e21c = 0
-                    st_last_tag = "RST"; st_last_ts = float(hv[j][0])
+                    st_last_tag = "RST"; st_last_ts = _daily_struct_event_ts(float(hv[j][0]))
                     st_b_anchor_close = 0.0
                     st_b_anchor_ts = 0.0
                 elif brk:
@@ -774,18 +790,18 @@ def _update_minimal_cycle_state(
                     if lo <= e9j:
                         # Pine "Power Bar": breakout and EMA9 test same candle.
                         st_last_tag = _tag_power_e9ct(st_last_tag)
-                    st_last_ts = float(hv[j][0])
+                    st_last_ts = _daily_struct_event_ts(float(hv[j][0]))
                     st_b_anchor_close = c
                     st_b_anchor_level = float(st_last_don_c or 0.0)
-                    st_b_anchor_ts = float(hv[j][0])
+                    st_b_anchor_ts = _daily_struct_event_ts(float(hv[j][0]))
                 elif st_state > 0:
                     # Pine's layout: first an if/elif for state==1 transitions, then a SEPARATE
                     # if for state==2 reclaim (so a bar that flipped 1→2 this bar can't also
                     # reclaim in the same bar — but one that was already in state 2 can).
                     if st_state == 1 and lo < e9j and c > e9j and not brk:
-                        st_e9t += 1; st_last_tag = _tag_e9ct(st_e9t); st_last_ts = float(hv[j][0])
+                        st_e9t += 1; st_last_tag = _tag_e9ct(st_e9t); st_last_ts = _daily_struct_event_ts(float(hv[j][0]))
                     elif st_state == 1 and c < e9j:
-                        st_state = 2; st_last_tag = TAG_ET9_WAIT_F21C; st_last_ts = float(hv[j][0])
+                        st_state = 2; st_last_tag = TAG_ET9_WAIT_F21C; st_last_ts = _daily_struct_event_ts(float(hv[j][0]))
                     elif st_state == 1 and c >= e9j and not brk:
                         # E21C without a prior ETDN: prior close was under *that bar’s* EMA21, this close
                         # reclaims back above the current EMA21 (rare; needs EMAs not stacked e9>21).
@@ -793,7 +809,7 @@ def _update_minimal_cycle_state(
                         e21_prev = float(e21_ser[j - 1])
                         if j >= 1 and pco < e21_prev and c > e21j:
                             st_e21c += 1; st_last_tag = f"E21C{st_e21c}"
-                            st_last_ts = float(hv[j][0])
+                            st_last_ts = _daily_struct_event_ts(float(hv[j][0]))
                     if st_state == 2 and c > e9j:
                         st_state = 1
                         # E21C = reclaimed EMA21 on the EMA9 reclaim bar, not the old touch+deep filter.
@@ -801,7 +817,7 @@ def _update_minimal_cycle_state(
                             st_e21c += 1; st_last_tag = f"E21C{st_e21c}"
                         else:
                             st_e9t += 1; st_last_tag = _tag_e9ct(st_e9t)
-                        st_last_ts = float(hv[j][0])
+                        st_last_ts = _daily_struct_event_ts(float(hv[j][0]))
         except Exception:
             pass
         r["cycle_state"] = st_state
@@ -825,11 +841,24 @@ def _update_minimal_cycle_state(
         _anc0 = float(r.get("brk_b_anchor_close", 0.0) or 0.0)
         _alv0 = float(r.get("brk_b_anchor_level", 0.0) or 0.0)
         _lt0 = str(r.get("last_tag") or "")
-        if (
-            (_anc0 <= 0.0 or _alv0 <= 0.0)
-            and int(r.get("b_count", 0) or 0) > 0
-            and _lt0.startswith("B")
-        ):
+        _tu0 = _lt0.strip().upper()
+        _bc0 = int(r.get("b_count", 0) or 0)
+        # SHM / slim rows may carry last_tag "B4" without b_count — repair anchor vs skipping forever.
+        if _bc0 <= 0 and _tu0.startswith("B"):
+            j = 1
+            while j < len(_tu0) and _tu0[j].isdigit():
+                j += 1
+            if j > 1:
+                try:
+                    _bc0 = int(_tu0[1:j])
+                except ValueError:
+                    _bc0 = 0
+        _anchor_missing = (_anc0 <= 0.0 or _alv0 <= 0.0)
+        _has_meaningful_tag = bool(_tu0) and _tu0 not in ("—", "RST")
+        _b_family = _bc0 > 0 and _tu0.startswith("B")
+        # Post-breakout structural tags still need the frozen B anchor for SINCE BRK % (D).
+        _e_family = _tu0.startswith("E") or _tu0.startswith("ET")
+        if _anchor_missing and _has_meaningful_tag and (_b_family or _e_family):
             r["cycle_last_bar_key"] = ""
             _update_minimal_cycle_state(r, hv, don_len=don_len)
         return
@@ -871,7 +900,7 @@ def _update_minimal_cycle_state(
             last_tag = _tag_power_e9ct(last_tag)
         r["brk_b_anchor_close"] = close
         r["brk_b_anchor_level"] = float(don_curr) if "don_curr" in locals() else 0.0
-        r["brk_b_anchor_ts"] = ts
+        r["brk_b_anchor_ts"] = _daily_struct_event_ts(ts)
     elif state > 0:
         # Pine's layout: state==1 transitions via if/elif, then a separate
         # if for state==2 reclaim so a 1→2 transition this bar cannot also reclaim.
@@ -905,7 +934,7 @@ def _update_minimal_cycle_state(
     r["e21c_count"] = e21c_count
     r["rst_count"] = rst_count
     r["last_tag"] = last_tag
-    r["last_event_ts"] = ts
+    r["last_event_ts"] = _daily_struct_event_ts(ts)
 
 
 def _weekly_ohlc5_from_daily_hv(hv: np.ndarray | None) -> np.ndarray | None:
@@ -2204,18 +2233,17 @@ def format_ui_row(d):
     except Exception:
         pass
 
-    # % since LTP when price first crossed brk_lvl this IST day (timing CB), not structural B close.
+    # SINCE BRK % (D): LTP vs frozen B Donchian (`brk_b_anchor_level`). Structural RST clears that
+    # anchor — then use rolling `brk_lvl` so the cell is not blank while still in reset/base.
     brk_move_live_ui = "—"
     brk_move_live_color = "#666666"
-    _live_px_d = float(d.get("cb_live_entry_px_d", 0.0) or 0.0)
+    _lt_d_u = str(d.get("last_tag") or "").strip().upper()
     _anch_d = float(d.get("brk_b_anchor_level", 0.0) or 0.0)
-    if _anch_d <= 0.0:
+    if _anch_d <= 0.0 and _lt_d_u == "RST":
         _anch_d = float(d.get("brk_lvl", 0.0) or 0.0)
-    if _anch_d > 0.0:
-        _live_px_d = _anch_d
     try:
-        if _live_px_d > 0 and _ltp_num > 0:
-            _lmd = ((_ltp_num / _live_px_d) - 1.0) * 100.0
+        if _anch_d > 0.0 and _ltp_num > 0.0:
+            _lmd = ((_ltp_num / _anch_d) - 1.0) * 100.0
             brk_move_live_ui = f"{_lmd:+.2f}%"
             if _lmd > 0:
                 brk_move_live_color = "#00FF00"
@@ -2275,7 +2303,6 @@ def format_ui_row(d):
             rs_rating_color = "#FF6666"
 
     # After RST, b_count is reset; the next Donchian + EMA-stack breakout prints B1 (same as a cold cycle).
-    _lt_d_u = str(d.get("last_tag") or "").strip().upper()
     _lt_w_u = str(d.get("last_tag_w") or "").strip().upper()
     post_rst_hint_d = "Post-RST → next tag B1" if _lt_d_u == "RST" else ""
     post_rst_hint_w = "Post-RST → next tag B1" if _lt_w_u == "RST" else ""
@@ -2300,6 +2327,29 @@ def format_ui_row(d):
     else:
         setup_score_color = "#FF6666"
     setup_score_ui = str(_sc)
+
+    _lsd_raw = str(d.get("live_struct_d") or "").strip()
+    if not _lsd_raw:
+        _lsd_latch = str(d.get("lsd_latch") or "").strip()
+        if _lsd_latch.upper().startswith("B:"):
+            _n = _lsd_latch.split(":", 1)[1].strip()
+            if _n.isdigit():
+                _lsd_raw = f"B{_n}_Breakout_Live_Watch"
+        elif _lsd_latch.upper().startswith("E:"):
+            _tag = _lsd_latch.split(":", 1)[1].strip().upper()
+            if _tag:
+                _lsd_raw = f"{_tag}_Live_Watch"
+    _lsd_ui = _lsd_raw if _lsd_raw else "—"
+    if "_failed_on_" in _lsd_raw:
+        _lsd_color = "#FF6666"
+    elif "_Live_Watch" in _lsd_raw:
+        _lsd_color = "#FFB000"
+    elif "(" in _lsd_raw and "_Confirmed" in _lsd_raw:
+        _lsd_color = "#00E5FF"
+    elif "_Confirmed" in _lsd_raw:
+        _lsd_color = "#00FF00"
+    else:
+        _lsd_color = "#D1D1D1"
 
     d.update({
         'symbol': ui_s, 'chp': f"{chp:+.2f}%", 'chp_color': chp_color,
@@ -2352,6 +2402,8 @@ def format_ui_row(d):
         'post_rst_hint_w': post_rst_hint_w,
         'post_rst_hint_dw': post_rst_hint_dw,
         'last_tag': str(d.get("last_tag") or "—"),
+        'live_struct_d': _lsd_ui,
+        'live_struct_d_color': _lsd_color,
         'b_count': int(d.get("b_count", 0) or 0),
         'e9t_count': int(d.get("e9t_count", 0) or 0),
         'e21c_count': int(d.get("e21c_count", 0) or 0),

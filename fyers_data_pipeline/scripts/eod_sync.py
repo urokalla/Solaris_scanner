@@ -290,6 +290,14 @@ def main():
         help="Log INFO line every N symbols (default 100, 0=off)",
     )
     args = ap.parse_args()
+    try:
+        per_symbol_gap_s = max(0.0, float(os.environ.get("EOD_SYNC_PER_SYMBOL_GAP_SECONDS", "2.0")))
+    except ValueError:
+        per_symbol_gap_s = 2.0
+    try:
+        heal_gap_s = max(0.0, float(os.environ.get("EOD_SYNC_HEAL_GAP_SECONDS", "0.5")))
+    except ValueError:
+        heal_gap_s = 0.5
 
     conn = ConnectionManager()
     if not conn.connect():
@@ -351,7 +359,8 @@ def main():
 
     logger.info(
         "📊 [EOD Sync] Start | symbols=%s (DB=%s, benchmarks=%s) | universe=%s | "
-        "EOD_NIFTY500_ONLY=%s EOD_INDEX_ONLY=%s | heal_days=%s (cal=%d)",
+        "EOD_NIFTY500_ONLY=%s EOD_INDEX_ONLY=%s | heal_days=%s (cal=%d) | "
+        "gap_s=%.2f heal_gap_s=%.2f",
         total,
         len(db_symbols),
         len(BENCHMARK_SYMBOLS),
@@ -360,6 +369,8 @@ def main():
         index_only,
         heal_days if heal_enabled else "off",
         len(reference_dates),
+        per_symbol_gap_s,
+        heal_gap_s,
     )
 
     counts = {APPENDED: 0, NO_TODAY_BAR: 0, NO_CANDLES: 0, NO_DATA: 0, REJECTED: 0, FAIL: 0}
@@ -380,6 +391,8 @@ def main():
             dynamic_ncols=True,
         )
 
+    rate_limited = False
+    processed = 0
     for i, symbol in iterator:
         code = sync_symbol(conn, pq_manager, symbol)
         if code == RATE_LIMIT:
@@ -389,7 +402,10 @@ def main():
                 total,
                 symbol,
             )
+            rate_limited = True
+            processed = i - 1
             break
+        processed = i
         counts[code] = counts.get(code, 0) + 1
         if heal_enabled and code not in (REJECTED,):
             filled = _heal_interior_gaps(conn, pq_manager, symbol, reference_dates, heal_days)
@@ -397,31 +413,35 @@ def main():
                 healed_bars += filled
                 healed_symbols += 1
                 # Extra delay after heal fetch to stay inside API quota.
-                time.sleep(0.15)
+                time.sleep(heal_gap_s)
         if args.log_every and i % args.log_every == 0:
             logger.info(
                 f"… progress {i}/{total} | appended={counts[APPENDED]} rejected={counts[REJECTED]} "
                 f"fail={counts[FAIL]} no_today_bar={counts[NO_TODAY_BAR]} "
                 f"healed_bars={healed_bars} healed_sym={healed_symbols}"
             )
-        time.sleep(0.1)
+        time.sleep(per_symbol_gap_s)
 
-    okish = total - counts[FAIL]
+    okish = processed - counts[FAIL]
     logger.info(
-        f"✅ [EOD Sync] Done | {okish}/{total} without exception | "
+        f"✅ [EOD Sync] Done | processed={processed}/{total} ok={okish}/{processed if processed else 1} | "
         f"appended={counts[APPENDED]} no_today_bar={counts[NO_TODAY_BAR]} "
         f"no_candles={counts[NO_CANDLES]} no_data={counts[NO_DATA]} "
         f"rejected={counts[REJECTED]} fail={counts[FAIL]} "
-        f"healed_bars={healed_bars} healed_sym={healed_symbols}"
+        f"healed_bars={healed_bars} healed_sym={healed_symbols} "
+        f"rate_limited={int(rate_limited)}"
     )
     # One line on stdout for docker / cron wrappers
     print(
-        f"EOD_SYNC_RESULT ok={okish}/{total} appended={counts[APPENDED]} "
+        f"EOD_SYNC_RESULT processed={processed}/{total} ok={okish}/{processed if processed else 1} "
+        f"partial={int(rate_limited)} reason={'rate_limit' if rate_limited else 'none'} "
+        f"appended={counts[APPENDED]} "
         f"rejected={counts[REJECTED]} fail={counts[FAIL]} "
         f"healed_bars={healed_bars} healed_sym={healed_symbols}",
         flush=True,
     )
-    sys.exit(0 if counts[FAIL] == 0 else 2)
+    # Partial/rate-limited runs are not successful EOD completion.
+    sys.exit(0 if (counts[FAIL] == 0 and not rate_limited) else 2)
 
 
 if __name__ == "__main__":

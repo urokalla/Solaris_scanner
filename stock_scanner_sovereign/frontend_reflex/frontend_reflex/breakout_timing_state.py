@@ -6,16 +6,19 @@ from .breakout_handlers import download_timing_excel_handler
 from .state import State
 
 
-class BreakoutTimingState(rx.State):
-    """Sidecar page: when the last daily / weekly cycle event occurred (IST from bar timestamp)."""
+class BreakoutClockState(rx.State):
+    """Shared breakout clock fields and actions (daily / weekly pages use subclasses)."""
 
-    universe: str = "Nifty 50"
+    clock_timeframe: str = ""
+    universe: str = "Nifty 500"
     search_query: str = ""
     timing_filter: str = "ALL"
     results: list[dict] = []
     total_count: int = 0
+    live_struct_rows: int = 0
+    live_struct_rows_raw: int = 0
     current_page: int = 1
-    page_size: int = 100
+    page_size: int = 50
     filter_brk_stage: str = "ALL"
     filter_mrs_grid: str = "ALL"
     filter_wmrs_slope: str = "ALL"
@@ -23,10 +26,18 @@ class BreakoutTimingState(rx.State):
     filter_profile: str = "ALL"
     status_message: str = "Offline"
     last_sync: str = "-"
+    eod_sync_status: str = "EOD_SYNC_UNKNOWN"
+    eod_expected_date: str = "-"
+    eod_fresh_count: int = 0
+    eod_total_count: int = 0
+    eod_stale_count: int = 0
+    eod_sync_pct: float = 0.0
+    eod_last_checked_ist: str = "-"
     sort_timing_key: str = "last_ts"
     sort_timing_desc: bool = True
     last_non_empty_signature: str = ""
     last_non_empty_results: list[dict] = []
+    results_signature: str = ""
 
     @rx.var
     def total_pages(self) -> int:
@@ -130,7 +141,8 @@ class BreakoutTimingState(rx.State):
             self.universe = u
         brk = get_breakout_scanner(universe=u, role="timing")
         brk.update_universe(u, None)
-        return BreakoutTimingState.poll_timing
+        # Reflex requires a class-referenced EventHandler, not `self.poll_timing` (plain function).
+        return type(self).poll_timing
 
     def set_universe(self, u: str):
         self.universe, self.current_page = u, 1
@@ -310,3 +322,20 @@ class BreakoutTimingState(rx.State):
     @rx.event(background=True)
     async def poll_timing(self):
         await poll_breakout_timing_handler(self)
+
+
+class BreakoutTimingDailyState(BreakoutClockState):
+    clock_timeframe: str = "daily"
+
+
+class BreakoutTimingWeeklyState(BreakoutClockState):
+    clock_timeframe: str = "weekly"
+    sort_timing_key: str = "last_ts_w"
+
+
+BreakoutTimingState = BreakoutTimingDailyState
+
+
+class BreakoutTimingLegacyRedirectState(rx.State):
+    async def on_load(self):
+        return rx.redirect("/breakout-clock-daily", is_external=False)

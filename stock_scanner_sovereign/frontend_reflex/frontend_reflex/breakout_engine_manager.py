@@ -31,12 +31,12 @@ def get_breakout_scanner(symbols=None, universe=None, role: str = "strategy"):
             breakout_instances[role_key] = inst
             # Isolation: only strategy instance runs the heavy loop in dashboard mode.
             if role_key == "strategy" and _dashboard_runs_loop():
-                print("📡 [Sidecar] Initializing Breakout Engine (strategy loop in dashboard)...")
+                print("📡 [Dashboard] Initializing Breakout Engine (strategy loop in dashboard)...")
                 inst.start_scanning()
             else:
                 # Timing/sidecar lazy mode: isolated instance serving `get_ui_view` only.
                 print(
-                    "📡 [Sidecar] Initializing Breakout Engine "
+                    "📡 [Dashboard] Initializing Breakout Engine "
                     f"({role_key} lazy mode — loop delegated to sidecar container)..."
                 )
         return inst

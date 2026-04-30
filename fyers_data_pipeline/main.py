@@ -261,8 +261,11 @@ def main_loop():
                         else:
                             # Record today's attempt regardless of script exit code to guarantee
                             # "one scheduled EOD attempt per day" and prevent retry storms.
-                            _mark_eod_attempt_today(today_str)
-                            if ok or "EOD_SYNC_RESULT ok=" in stdout:
+                            _partial = "partial=1" in stdout or "reason=rate_limit" in stdout
+                            # Do not mark attempt on partial/rate-limited run; allow retries within window.
+                            if not _partial:
+                                _mark_eod_attempt_today(today_str)
+                            if (ok or "EOD_SYNC_RESULT ok=" in stdout) and not _partial:
                                 _write_date_flag(".eod_last_ok_date", today_str)
                                 last_token_skip_ts = 0.0
                                 last_token_skip_mtime = 0.0

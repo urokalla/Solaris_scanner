@@ -73,6 +73,9 @@ services:
       - EOD_INDEX_ONLY=${EOD_INDEX_ONLY:-0}
       # Gap-heal: refetch any missing interior session bars in the last N days (0 = disabled).
       - EOD_HEAL_DAYS=${EOD_HEAL_DAYS:-30}
+      # EOD API pacing (reliability vs duration): 1.0s over ~2200 symbols ≈ ~40m (+heal overhead).
+      - EOD_SYNC_PER_SYMBOL_GAP_SECONDS=${EOD_SYNC_PER_SYMBOL_GAP_SECONDS:-1.0}
+      - EOD_SYNC_HEAL_GAP_SECONDS=${EOD_SYNC_HEAL_GAP_SECONDS:-0.5}
       # monthly_rsi2_lt2_snapshot: run weekdays after this IST time (default 15:00 = ~pre-close)
       - MONTHLY_RSI2_SNAPSHOT_ENABLED=${MONTHLY_RSI2_SNAPSHOT_ENABLED:-1}
       - MONTHLY_RSI2_SNAPSHOT_IST_HOUR=${MONTHLY_RSI2_SNAPSHOT_IST_HOUR:-15}

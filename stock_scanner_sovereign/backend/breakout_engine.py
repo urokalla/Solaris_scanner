@@ -1,7 +1,11 @@
 import threading, time, os, json, numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils.zone_info import ZoneInfo
-from utils.pipeline_bridge import PipelineBridge; from utils.ring_buffer import RingBuffer
+from utils.pipeline_bridge import PipelineBridge
+from utils.ring_buffer import RingBuffer
+from config.settings import Settings
+
+from .live_struct_d import update_live_struct_d_row
 from .database import DatabaseManager; from utils.constants import BENCHMARK_MAP, SIGNAL_DTYPE
 from .breakout_logic import (
     TAG_ET9_WAIT_F21C,
@@ -19,9 +23,18 @@ from .breakout_logic import (
 from .scanner_shm import SHMBridge
 
 _IST_TIMING = ZoneInfo("Asia/Kolkata")
+CYCLE_REPLAY_VERSION = 2
 _TIMING_SNAPSHOT_FIELDS = (
+    # Structural daily/weekly cycle (WHEN columns source); persisted so restarts do not blank tags/times.
+    "last_tag",
+    "last_event_ts",
+    "cycle_last_bar_key",
+    "last_tag_w",
+    "last_event_ts_w",
+    "cycle_last_bar_key_w",
     "timing_last_tag", "timing_last_event_ts",
     "timing_last_tag_w", "timing_last_event_ts_w",
+    "_cycle_replay_v",
     "cb_pending_day_d", "cb_pending_tag_d", "cb_pending_ts_d",
     "cb_pending_prev_tag_d", "cb_sustain_base_tag_d",
     "cb_last_confirm_day_d", "cb_count_d", "cb_live_entry_px_d", "cb_live_entry_day_d",
@@ -31,6 +44,16 @@ _TIMING_SNAPSHOT_FIELDS = (
     "cb_prev_day_d", "cb_prev_ltp_d", "cb_prev_week_w", "cb_prev_ltp_w",
     "cb_not_sustained_day_d", "cb_not_sustained_ts_d",
     "cb_not_sustained_week_w", "cb_not_sustained_ts_w",
+    # LIVE_STRUCT_D (live structural ledger vs last_tag); no CB overlay.
+    "live_struct_d",
+    "lsd_latch",
+    "lsd_ist_day",
+    "lsd_ge9",
+    "lsd_e9ct_touch",
+    "lsd_under9_streak",
+    "lsd_eod_key",
+    "lsd_prev_ltp",
+    "lsd_sticky_confirmed",
 )
 
 
@@ -55,6 +78,53 @@ def _ltp_pct_vs_anchor(x: dict, anchor_key: str) -> float:
         l = float(x.get("ltp") or 0.0)
         if a > 0.0 and l > 0.0:
             return (l / a - 1.0) * 100.0
+    except (TypeError, ValueError):
+        pass
+    return float("-inf")
+
+
+def _since_brk_anchor_d_for_pct(row: dict) -> float:
+    """Positive anchor for daily SINCE BRK %: frozen B level, or at RST only rolling brk_lvl."""
+    try:
+        ad = float(row.get("brk_b_anchor_level", 0.0) or 0.0)
+        if ad > 0.0:
+            return ad
+        if str(row.get("last_tag") or "").strip().upper() == "RST":
+            br = float(row.get("brk_lvl", 0.0) or 0.0)
+            if br > 0.0:
+                return br
+    except (TypeError, ValueError):
+        pass
+    return 0.0
+
+
+def _ltp_pct_since_brk_d_strict(x: dict) -> float:
+    """Sort key for SINCE BRK % (D): same anchor as UI (B anchor, else RST → brk_lvl)."""
+    try:
+        ad = _since_brk_anchor_d_for_pct(x)
+        l = float(x.get("ltp") or 0.0)
+        if ad > 0.0 and l > 0.0:
+            return (l / ad - 1.0) * 100.0
+    except (TypeError, ValueError):
+        pass
+    return float("-inf")
+
+
+def _ltp_pct_timing_rule_a_w(x: dict) -> float:
+    """Sort key for SINCE BRK % (W): same anchor as timing Rule A for weekly."""
+    try:
+        _rst_cb = (
+            str(x.get("last_tag_w") or "").strip().upper() == "RST"
+            and str(x.get("timing_last_tag_w") or "").strip().upper().startswith("CB")
+        )
+        aw = float(x.get("brk_b_anchor_level_w", 0.0) or 0.0)
+        if _rst_cb:
+            aw = float(x.get("brk_lvl_w", 0.0) or 0.0)
+        elif aw <= 0.0:
+            aw = float(x.get("brk_lvl_w", 0.0) or 0.0)
+        l = float(x.get("ltp") or 0.0)
+        if aw > 0.0 and l > 0.0:
+            return (l / aw - 1.0) * 100.0
     except (TypeError, ValueError):
         pass
     return float("-inf")
@@ -148,6 +218,26 @@ def _timing_e_sustained(d: dict) -> bool:
     td = str(d.get("timing_last_tag") or "").strip().upper()
     tw = str(d.get("timing_last_tag_w") or "").strip().upper()
     return (td.startswith("CE") and td.endswith("S")) or (tw.startswith("CE") and tw.endswith("S"))
+
+
+def _timing_e_family_daily_clock(d: dict) -> bool:
+    u = str(d.get("timing_last_tag") or d.get("last_tag") or "").strip().upper()
+    return u.startswith("CE")
+
+
+def _timing_e_sustained_daily_clock(d: dict) -> bool:
+    u = str(d.get("timing_last_tag") or d.get("last_tag") or "").strip().upper()
+    return u.startswith("CE") and u.endswith("S")
+
+
+def _timing_e_family_weekly_clock(d: dict) -> bool:
+    u = str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "").strip().upper()
+    return u.startswith("CE")
+
+
+def _timing_e_sustained_weekly_clock(d: dict) -> bool:
+    u = str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "").strip().upper()
+    return u.startswith("CE") and u.endswith("S")
 
 
 def _is_index_row(sym) -> bool:
@@ -433,6 +523,109 @@ class BreakoutScanner:
         self.is_scanning = True
         threading.Thread(target=main_loop_helper, args=(self,), daemon=True).start()
 
+    def _maybe_eod_parquet_refresh(self, mode: str, clock_tf: str) -> None:
+        """Once per IST weekday after configured time: reload daily history from parquet into buffers (timing+daily)."""
+        if not getattr(Settings, "BREAKOUT_TIMING_EOD_PARQUET_REFRESH_ENABLED", True):
+            return
+        if mode != "timing" or clock_tf != "daily":
+            return
+        now_ist = datetime.now(_IST_TIMING)
+        if now_ist.weekday() >= 5:
+            return
+        h = int(getattr(Settings, "BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_HOUR", 16))
+        m = int(getattr(Settings, "BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_MINUTE", 30))
+        if (now_ist.hour, now_ist.minute) < (h, m):
+            return
+        d = now_ist.date()
+        with self.lock:
+            if getattr(self, "_eod_parquet_refresh_date", None) == d:
+                return
+            self._eod_parquet_refresh_date = d
+            self._cycle_backfill_ts.clear()
+            for sym in list(self.all_s):
+                buf = self.buffers.get(sym)
+                if buf is None:
+                    continue
+                try:
+                    hist = self.bridge.get_historical_data(sym, limit=900)
+                    _need_db_hist = hist is None or len(hist) == 0
+                    if not _need_db_hist:
+                        try:
+                            # Some parquet symbols can lag 1+ sessions behind DB updates; guard against stale LAST_TAG.
+                            _db_head = self.db.get_historical_data(sym, "1d", limit=2)
+                            if _db_head is not None and len(_db_head) > 0:
+                                _bridge_last_ts = float(hist[-1][0])
+                                _db_last_ts = float(_db_head[-1][0])
+                                if (_db_last_ts - _bridge_last_ts) >= 43200.0:
+                                    _need_db_hist = True
+                        except Exception:
+                            pass
+                    if _need_db_hist:
+                        hist = self.db.get_historical_data(sym, "1d", limit=900)
+                    if hist is not None and len(hist) > 0:
+                        buf.clear()
+                        for rr in hist:
+                            buf.append(rr)
+                except Exception:
+                    pass
+
+    def _timing_eod_sync_status(self) -> dict:
+        now = float(time.time())
+        cached_ts = float(getattr(self, "_eod_status_cache_ts", 0.0) or 0.0)
+        cached = getattr(self, "_eod_status_cache", None)
+        if cached is not None and (now - cached_ts) < 30.0:
+            return dict(cached)
+
+        now_ist = datetime.now(_IST_TIMING)
+        h = int(getattr(Settings, "BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_HOUR", 16))
+        m = int(getattr(Settings, "BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_MINUTE", 30))
+        expected = now_ist.date()
+        # Before today's EOD cutoff (or on weekends), expected freshness is previous trading day.
+        if now_ist.weekday() >= 5 or (now_ist.hour, now_ist.minute) < (h, m):
+            expected = expected - timedelta(days=1)
+        while expected.weekday() >= 5:
+            expected = expected - timedelta(days=1)
+
+        fresh = 0
+        stale = 0
+        sample_stale: list[str] = []
+        total = len(getattr(self, "symbols", []) or [])
+        for sym in (getattr(self, "symbols", []) or []):
+            try:
+                hist = self.bridge.get_historical_data(sym, limit=2)
+                if hist is None or len(hist) == 0:
+                    stale += 1
+                    if len(sample_stale) < 8:
+                        sample_stale.append(f"{sym}:none")
+                    continue
+                last_ts = float(hist[-1][0])
+                last_d = datetime.fromtimestamp(last_ts, tz=_IST_TIMING).date()
+                if last_d >= expected:
+                    fresh += 1
+                else:
+                    stale += 1
+                    if len(sample_stale) < 8:
+                        sample_stale.append(f"{sym}:{last_d.isoformat()}")
+            except Exception:
+                stale += 1
+                if len(sample_stale) < 8:
+                    sample_stale.append(f"{sym}:err")
+
+        status = "EOD_SYNC_COMPLETE" if stale == 0 else "EOD_SYNC_IN_PROGRESS"
+        out = {
+            "eod_sync_status": status,
+            "eod_expected_date": expected.isoformat(),
+            "eod_fresh_count": int(fresh),
+            "eod_total_count": int(total),
+            "eod_stale_count": int(stale),
+            "eod_stale_sample": sample_stale,
+            "eod_sync_pct": (float(fresh) / float(total) * 100.0) if total > 0 else 0.0,
+            "eod_last_checked_ist": now_ist.strftime("%H:%M:%S"),
+        }
+        self._eod_status_cache_ts = now
+        self._eod_status_cache = dict(out)
+        return out
+
     def get_ui_view(self, **kw):
         with self.lock: data = [v.copy() for v in self.results.values()]
         # `SHMBridge.load_index_map()` replaces `idx_map` with a new dict when the master rewrites
@@ -451,8 +644,10 @@ class BreakoutScanner:
         if not hasattr(self, "_cycle_backfill_ts"):
             self._cycle_backfill_ts = {}
         # mode="strategy" → /breakout: confirmed bar tags (B, E9CT, ET9DNWF21C, E21C, RST). No live CB overlay.
-        # mode="timing"   → /breakout-timing page: live intraday CBBUY overlay + confirmed tags.
+        # mode="timing"   → breakout clock pages: live intraday CBBUY overlay + confirmed tags.
         mode = str(kw.get("mode") or "strategy").strip().lower()
+        _clock_tf = str(kw.get("clock_timeframe") or "").strip().lower()
+        self._maybe_eod_parquet_refresh(mode, _clock_tf)
         profile_f = str(kw.get("profile") or "ALL").strip().upper()
         if profile_f != "ALL":
             filtered = []
@@ -495,17 +690,37 @@ class BreakoutScanner:
             "last_tag_w", "last_event_ts_w", "cycle_last_bar_key_w", "brk_lvl_w",
             "brk_b_anchor_close_w", "brk_b_anchor_level_w", "brk_b_anchor_ts_w",
             "_wcycle_v",
+            "_cycle_replay_v",
         )
         for d in data:
+            sym = str(d.get("symbol") or "").strip()
             lt = str(d.get("last_tag") or "").strip()
             ltw = str(d.get("last_tag_w") or "").strip()
             brk_ok = float(d.get("brk_lvl") or 0.0) > 0.0
             brk_w_ok = float(d.get("brk_lvl_w") or 0.0) > 0.0
             _wcv = int(d.get("_wcycle_v") or 0)
+            _cv = int(d.get("_cycle_replay_v") or 0)
             _need_cycle_refresh = _wcv < WEEKLY_CYCLE_PARITY_VERSION
-            # Persist used to omit brk_b_anchor_level(_w); rows could have tags + brk_lvl_w but
+            _need_cycle_replay = _cv < CYCLE_REPLAY_VERSION
+            _tag_u = str(lt).strip().upper()
+            _core_inconsistent = (
+                _tag_u not in ("", "—", "RST")
+                and int(d.get("cycle_state") or 0) == 0
+                and int(d.get("b_count") or 0) == 0
+                and int(d.get("e9t_count") or 0) == 0
+                and int(d.get("e21c_count") or 0) == 0
+            )
+            if _core_inconsistent:
+                _need_cycle_replay = True
+            # Persist used to omit brk_b_anchor_level(_w); rows could have tags + brk_lvl(_w) but
             # anchor 0 → SINCE BRK % fell back to rolling Donchian (~2%) instead of fixed B (~12%).
+            _lt_u = str(lt).strip().upper()
             _lw_u = str(ltw).strip().upper()
+            _need_anchor_d = (
+                brk_ok
+                and _lt_u not in ("", "—", "RST")
+                and float(d.get("brk_b_anchor_level") or 0.0) <= 0.0
+            )
             _need_anchor_w = (
                 brk_w_ok
                 and _lw_u not in ("", "—", "RST")
@@ -517,10 +732,11 @@ class BreakoutScanner:
                 and brk_ok
                 and brk_w_ok
                 and not _need_cycle_refresh
+                and not _need_cycle_replay
                 and not _need_anchor_w
+                and not _need_anchor_d
             ):
                 continue
-            sym = str(d.get("symbol") or "").strip()
             if not sym:
                 continue
             try:
@@ -532,18 +748,34 @@ class BreakoutScanner:
                 self._cycle_backfill_ts[sym] = now_ts
                 buf = self.buffers.get(sym)
                 hv = buf.get_ordered_view() if buf is not None else None
-                if hv is None or len(hv) < 6:
+                _force_full_hist = _need_cycle_replay
+                if _force_full_hist or hv is None or len(hv) < 6:
                     hist = self.bridge.get_historical_data(sym, limit=900)
-                    if hist is None:
+                    _need_db_hist = hist is None or len(hist) == 0
+                    if not _need_db_hist:
+                        try:
+                            # Prefer DB when parquet is stale for specific symbols (e.g. delayed files).
+                            _db_head = self.db.get_historical_data(sym, "1d", limit=2)
+                            if _db_head is not None and len(_db_head) > 0:
+                                _bridge_last_ts = float(hist[-1][0])
+                                _db_last_ts = float(_db_head[-1][0])
+                                if (_db_last_ts - _bridge_last_ts) >= 43200.0:
+                                    _need_db_hist = True
+                        except Exception:
+                            pass
+                    if _need_db_hist:
                         hist = self.db.get_historical_data(sym, "1d", limit=900)
                     if hist is not None and len(hist) > 0 and buf is not None:
                         with self.lock:
+                            if _force_full_hist:
+                                buf.clear()
                             for rr in hist:
                                 buf.append(rr)
                         hv = buf.get_ordered_view()
                 if hv is not None and len(hv) >= 6:
                     _update_minimal_cycle_state(d, hv, don_len=don_win)
                     _update_minimal_cycle_state_weekly(d, hv, don_len=don_win)
+                    d["_cycle_replay_v"] = CYCLE_REPLAY_VERSION
                     # Persist into the stored row so the next poll (either page) gets it
                     # without re-running history, independent of the throttle cache.
                     with self.lock:
@@ -662,6 +894,16 @@ class BreakoutScanner:
                                     d["ema21_d"] = float(e21)
                     except Exception:
                         pass
+                    # LIVE_STRUCT_D: live structural ledger vs last_tag (daily clock only; independent of CB overlay).
+                    try:
+                        if _clock_tf == "daily":
+                            sym = str(d.get("symbol") or "")
+                            buf = self.buffers.get(sym)
+                            hv = buf.get_ordered_view() if buf is not None else None
+                            don_win = max(2, int(self.params.get("pivot_high_window", 10)))
+                            update_live_struct_d_row(d, hv, don_win, _now_ist)
+                    except Exception:
+                        pass
                     _qts = d.pop("_shm_quote_ts", None)
                     _update_live_timing_breakout_status(
                         d, float(d.get("ltp", 0.0) or 0.0), _now_ist, _qts
@@ -673,16 +915,13 @@ class BreakoutScanner:
                         with self.lock:
                             stored = self.results.get(sym)
                             if stored is not None:
-                                for k in (
-                                    "ema9_d", "ema21_d", *_TIMING_SNAPSHOT_FIELDS
-                                ):
+                                for k in ("ema9_d", "ema21_d", *_TIMING_SNAPSHOT_FIELDS):
                                     if k in d:
                                         stored[k] = d[k]
                     except Exception:
                         pass
                 except Exception:
                     pass
-            self._flush_timing_snapshot()
         sq = (kw.get("search") or "").upper()
         # Sidecar v2 uses Pine-parity state_name + last_tag.
         st = (kw.get("brk_stage") or kw.get("status") or "ALL").strip().upper()
@@ -692,20 +931,42 @@ class BreakoutScanner:
         logger = logging.getLogger("BreakoutEngine")
         if st != "ALL":
             logger.info(f"🔍 [Breakout] BRK_STAGE={st} filter on {len(data)} symbols...")
-            data = [
-                d
-                for d in data
-                if (
-                    str(d.get("state_name", "")).upper() == st
-                    or _last_tag_matches_tag_filter(str(d.get("last_tag", "")), st)
-                )
-            ]
+            if mode == "timing" and _clock_tf == "weekly":
+                data = [
+                    d
+                    for d in data
+                    if (
+                        str(d.get("state_name_w", "")).upper() == st
+                        or _last_tag_matches_tag_filter(str(d.get("last_tag_w", "")), st)
+                    )
+                ]
+            elif mode == "timing" and _clock_tf == "daily":
+                data = [
+                    d
+                    for d in data
+                    if (
+                        str(d.get("state_name", "")).upper() == st
+                        or _last_tag_matches_tag_filter(str(d.get("last_tag", "")), st)
+                    )
+                ]
+            else:
+                data = [
+                    d
+                    for d in data
+                    if (
+                        str(d.get("state_name", "")).upper() == st
+                        or _last_tag_matches_tag_filter(str(d.get("last_tag", "")), st)
+                    )
+                ]
         fm = (kw.get("filter_m_rsi2") or "ALL").strip().upper()
         if fm not in ("ALL", "", "NONE"):
+            _tag_key = "last_tag"
+            if mode == "timing" and _clock_tf == "weekly":
+                _tag_key = "last_tag_w"
             data = [
                 d
                 for d in data
-                if _last_tag_matches_tag_filter(str(d.get("last_tag", "")), fm)
+                if _last_tag_matches_tag_filter(str(d.get(_tag_key, "")), fm)
             ]
         mgrid = (kw.get("filter_mrs_grid") or "ALL").strip().upper()
         if mgrid == "TREND_OK":
@@ -727,8 +988,20 @@ class BreakoutScanner:
             data = [d for d in data if _sidecar_preset_keep(d, preset_norm)]
         tf = (kw.get("timing_filter") or "ALL").strip().upper()
         _today_iso = _timing_today_iso()
+        if mode == "timing" and _clock_tf == "daily":
+            if tf in ("SUSTAINED_W", "W_SUSTAINED", "W_BRK"):
+                tf = "ALL"
+        elif mode == "timing" and _clock_tf == "weekly":
+            if tf in ("LIVE", "SUSTAINED", "NOT_SUSTAINED", "D_BRK"):
+                tf = "ALL"
+        if mode == "timing" and _clock_tf == "daily" and tf in ("ANY_BRK", "B_ANY"):
+            tf = "D_BRK"
+        elif mode == "timing" and _clock_tf == "weekly" and tf in ("ANY_BRK", "B_ANY"):
+            tf = "W_BRK"
         if tf == "LIVE":
             data = [d for d in data if _timing_live_daily(d, _today_iso)]
+        elif tf in ("LIVE_STRUCT_ONLY", "LIVE_STRUCT", "LSD"):
+            data = [d for d in data if str(d.get("live_struct_d") or "").strip()]
         elif tf == "SUSTAINED":
             data = [d for d in data if _timing_sustained_daily(d, _today_iso)]
         elif tf in ("SUSTAINED_W", "W_SUSTAINED"):
@@ -736,14 +1009,24 @@ class BreakoutScanner:
         elif tf == "NOT_SUSTAINED":
             data = [d for d in data if _timing_not_sustained_daily(d, _today_iso)]
         elif tf in ("E_TIMING", "E_FAMILY"):
-            data = [d for d in data if _timing_e_family(d)]
+            if _clock_tf == "daily":
+                data = [d for d in data if _timing_e_family_daily_clock(d)]
+            elif _clock_tf == "weekly":
+                data = [d for d in data if _timing_e_family_weekly_clock(d)]
+            else:
+                data = [d for d in data if _timing_e_family(d)]
         elif tf in ("E_SUSTAINED", "E_S"):
-            data = [d for d in data if _timing_e_sustained(d)]
+            if _clock_tf == "daily":
+                data = [d for d in data if _timing_e_sustained_daily_clock(d)]
+            elif _clock_tf == "weekly":
+                data = [d for d in data if _timing_e_sustained_weekly_clock(d)]
+            else:
+                data = [d for d in data if _timing_e_sustained(d)]
         elif tf == "D_BRK":
             data = [
                 d
                 for d in data
-                if str(d.get("timing_last_tag") or d.get("last_tag") or "").upper().startswith(("B", "CB"))
+                if str(d.get("last_tag") or "").upper().startswith(("B", "CB"))
             ]
         elif tf == "W_BRK":
             data = [
@@ -755,13 +1038,23 @@ class BreakoutScanner:
             data = [
                 d
                 for d in data
-                if str(d.get("timing_last_tag") or d.get("last_tag") or "").upper().startswith(("B", "CB"))
+                if str(d.get("last_tag") or "").upper().startswith(("B", "CB"))
                 or str(d.get("timing_last_tag_w") or d.get("last_tag_w") or "").upper().startswith(("B", "CB"))
             ]
         for _row in data:
             _row["setup_score"] = compute_breakout_setup_score_row(_row)
         sort_key = (kw.get("sort_key") or "").strip().lower()
         sort_desc = bool(kw.get("sort_desc", False))
+
+        # Daily clock UX: when using the default "when" sort, surface active LIVE_STRUCT_D rows first.
+        # Otherwise they can be spread across pages and appear "blank" at a glance.
+        if mode == "timing" and _clock_tf == "daily" and sort_key in ("", "last_ts", "last_event", "event_d", "when_d"):
+            data.sort(
+                key=lambda x: (
+                    0 if str(x.get("live_struct_d") or "").strip() else 1,
+                    -float(x.get("last_event_ts", 0.0) or 0.0),
+                )
+            )
 
         def _brk_sort_val(x):
             v = x.get("brk_lvl")
@@ -780,7 +1073,7 @@ class BreakoutScanner:
             data.sort(key=lambda x: float(x.get("mrs", 0) or 0), reverse=sort_desc)
         elif sort_key in ("last_tag_d", "timing_last_tag_d"):
             data.sort(
-                key=lambda x: str(x.get("timing_last_tag") or x.get("last_tag") or "").upper(),
+                key=lambda x: str(x.get("last_tag") or "").upper(),
                 reverse=sort_desc,
             )
         elif sort_key in ("last_tag_w", "timing_last_tag_w"):
@@ -791,21 +1084,24 @@ class BreakoutScanner:
         elif sort_key == "pct_from_b_d":
             data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "brk_b_anchor_close"), reverse=sort_desc)
         elif sort_key == "pct_live_d":
-            data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "cb_live_entry_px_d"), reverse=sort_desc)
+            data.sort(key=_ltp_pct_since_brk_d_strict, reverse=sort_desc)
         elif sort_key == "pct_from_b_w":
             data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "brk_b_anchor_close_w"), reverse=sort_desc)
         elif sort_key == "pct_live_w":
-            data.sort(key=lambda x: _ltp_pct_vs_anchor(x, "cb_live_entry_px_w"), reverse=sort_desc)
+            data.sort(key=_ltp_pct_timing_rule_a_w, reverse=sort_desc)
         elif sort_key == "mrs_grid":
             data.sort(key=_mrs_grid_sort_priority, reverse=sort_desc)
         elif sort_key in ("last_ts", "last_event", "event_d", "when_d"):
-            data.sort(key=lambda x: float(x.get("timing_last_event_ts", x.get("last_event_ts", 0)) or 0), reverse=sort_desc)
+            data.sort(key=lambda x: float(x.get("last_event_ts", 0) or 0), reverse=sort_desc)
         elif sort_key in ("last_ts_w", "event_w", "when_w"):
             data.sort(key=lambda x: float(x.get("timing_last_event_ts_w", x.get("last_event_ts_w", 0)) or 0), reverse=sort_desc)
         elif sort_key in ("brk", "brklvl", "brk_lvl", "don10"):
             data.sort(key=_brk_sort_val, reverse=sort_desc)
         elif sort_key in ("state", "state_name"):
-            data.sort(key=lambda x: str(x.get("state_name", "") or "").lower(), reverse=sort_desc)
+            if mode == "timing" and _clock_tf == "weekly":
+                data.sort(key=lambda x: str(x.get("state_name_w", "") or "").lower(), reverse=sort_desc)
+            else:
+                data.sort(key=lambda x: str(x.get("state_name", "") or "").lower(), reverse=sort_desc)
         elif sort_key in ("last", "last_tag", "status", "stage"):
             data.sort(key=lambda x: float(x.get("last_event_ts", 0.0) or 0.0), reverse=True)
         elif sort_key == "b_count":
@@ -827,37 +1123,63 @@ class BreakoutScanner:
             data.sort(key=lambda x: float(x.get("last_event_ts", 0.0) or 0.0), reverse=True)
         _raw_rows = list(data)
         data = [format_ui_row(d) for d in _raw_rows]
-        # Final display guard: enforce Rule A for SINCE BRK % on rendered rows.
-        # D: breakout-level anchor (brk_b_anchor_level -> brk_lvl)
-        # W: breakout-level anchor (brk_b_anchor_level_w -> brk_lvl_w)
-        for i, raw in enumerate(_raw_rows):
-            try:
-                ltp = float(raw.get("ltp") or 0.0)
-            except Exception:
-                ltp = 0.0
-            if ltp <= 0.0:
-                continue
-            try:
-                ad = float(raw.get("brk_b_anchor_level", 0.0) or 0.0)
-                if ad <= 0.0:
-                    ad = float(raw.get("brk_lvl", 0.0) or 0.0)
-                data[i]["brk_move_live_pct"] = f"{((ltp / ad) - 1.0) * 100.0:+.2f}%" if ad > 0.0 else "—"
-            except Exception:
-                pass
-            try:
-                _lw_rst_cb = (
-                    str(raw.get("last_tag_w") or "").strip().upper() == "RST"
-                    and str(raw.get("timing_last_tag_w") or "").strip().upper().startswith("CB")
-                )
-                aw = float(raw.get("brk_b_anchor_level_w", 0.0) or 0.0)
-                if _lw_rst_cb:
-                    aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
-                elif aw <= 0.0:
-                    aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
-                data[i]["brk_move_live_pct_w"] = f"{((ltp / aw) - 1.0) * 100.0:+.2f}%" if aw > 0.0 else "—"
-            except Exception:
-                pass
+        # Timing clock: reconcile live LTP % vs frozen anchors (format_ui_row uses same rules).
+        # Daily: B/E/ET = brk_b_anchor_level; structural RST only = rolling brk_lvl (anchor cleared on reset).
+        # Weekly page: weekly column keeps Rule A (anchor → brk_lvl_w, RST+CB → brk_lvl_w).
+        if mode == "timing":
+            for i, raw in enumerate(_raw_rows):
+                try:
+                    ltp = float(raw.get("ltp") or 0.0)
+                except Exception:
+                    ltp = 0.0
+                if _clock_tf == "daily":
+                    try:
+                        ad = _since_brk_anchor_d_for_pct(raw)
+                        if ltp > 0.0 and ad > 0.0:
+                            _lmd = ((ltp / ad) - 1.0) * 100.0
+                            data[i]["brk_move_live_pct"] = f"{_lmd:+.2f}%"
+                            if _lmd > 0:
+                                data[i]["brk_move_live_color"] = "#00FF00"
+                            elif _lmd < 0:
+                                data[i]["brk_move_live_color"] = "#FF3131"
+                            else:
+                                data[i]["brk_move_live_color"] = "#D1D1D1"
+                        else:
+                            data[i]["brk_move_live_pct"] = "—"
+                            data[i]["brk_move_live_color"] = "#666666"
+                    except Exception:
+                        pass
+                elif _clock_tf == "weekly" and ltp > 0.0:
+                    try:
+                        _lw_rst_cb = (
+                            str(raw.get("last_tag_w") or "").strip().upper() == "RST"
+                            and str(raw.get("timing_last_tag_w") or "").strip().upper().startswith("CB")
+                        )
+                        aw = float(raw.get("brk_b_anchor_level_w", 0.0) or 0.0)
+                        if _lw_rst_cb:
+                            aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
+                        elif aw <= 0.0:
+                            aw = float(raw.get("brk_lvl_w", 0.0) or 0.0)
+                        if aw > 0.0:
+                            _lmw = ((ltp / aw) - 1.0) * 100.0
+                            data[i]["brk_move_live_pct_w"] = f"{_lmw:+.2f}%"
+                            if _lmw > 0:
+                                data[i]["brk_move_live_color_w"] = "#00FF00"
+                            elif _lmw < 0:
+                                data[i]["brk_move_live_color_w"] = "#FF3131"
+                            else:
+                                data[i]["brk_move_live_color_w"] = "#D1D1D1"
+                        else:
+                            data[i]["brk_move_live_pct_w"] = "—"
+                            data[i]["brk_move_live_color_w"] = "#666666"
+                    except Exception:
+                        pass
+        # Persist structural + timing carry-over (throttled inside); avoids blank WHEN/LAST TAG after restart.
+        self._flush_timing_snapshot()
         p, ps = kw.get("page", 1), kw.get("page_size", 50)
-        return {"results": data[(p-1)*ps : p*ps], "total_count": len(data)}
+        out = {"results": data[(p-1)*ps : p*ps], "total_count": len(data)}
+        if mode == "timing" and _clock_tf == "daily":
+            out.update(self._timing_eod_sync_status())
+        return out
 
     def stop_scanning(self): self.is_scanning = False

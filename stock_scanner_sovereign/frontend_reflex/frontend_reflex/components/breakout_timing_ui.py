@@ -1,16 +1,48 @@
 import reflex as rx
 
-from ..breakout_timing_state import BreakoutTimingState
+from ..breakout_timing_state import BreakoutTimingDailyState, BreakoutTimingWeeklyState
 from utils.constants import UNIVERSE_OPTIONS
 
+_PROFILE_OPTS = ["ALL", "ELITE", "LEADER", "RISING", "LAGGARD", "FADING", "BASELINE"]
+_BRK_OPTIONS = [
+    "ALL",
+    "LOCKED",
+    "TRENDING",
+    "PULLBACK",
+    "B",
+    "E9CT",
+    "ET9DNWF21C",
+    "E21C",
+    "RST",
+]
+_MRS_GRID = ["ALL", "TREND_OK"]
+_WMRS_SLOPE = ["ALL", "POS"]
+_TAG_PREFIX_OPTS = [
+    "ALL",
+    "B",
+    "E9CT",
+    "E9CT1",
+    "E9CT2",
+    "E9CT3",
+    "E9CT4",
+    "E9CT5",
+    "E9CT6",
+    "E9CT7",
+    "E9CT8",
+    "E9CT9",
+    "ET9DNWF21C",
+    "E21C",
+    "RST",
+]
 
-def breakout_timing_header():
+
+def breakout_timing_daily_header():
     return rx.vstack(
         rx.hstack(
             rx.vstack(
-                rx.text("SOLARIS • BREAKOUT CLOCK", size="4", color="#00E5FF", font_weight="bold"),
+                rx.text("SOLARIS • BREAKOUT CLOCK • DAILY", size="4", color="#00E5FF", font_weight="bold"),
                 rx.text(
-                    "Last cycle event time = daily / weekly bar timestamp (IST), same engine as Breakout.",
+                    "Daily structural tags (LAST TAG D, WHEN D) + tape; weekly columns live on the Weekly clock page.",
                     size="1",
                     color="#888888",
                 ),
@@ -21,12 +53,107 @@ def breakout_timing_header():
             rx.vstack(
                 rx.hstack(
                     rx.link("← Breakout grid", href="/breakout", color="#FFB000", font_size="12px"),
+                    rx.link("Weekly clock →", href="/breakout-clock-weekly", color="#00E5FF", font_size="12px"),
                     spacing="3",
                 ),
                 rx.text("ENGINE STATUS", size="1", color="#D1D1D1", font_weight="bold"),
                 rx.hstack(
-                    rx.text(BreakoutTimingState.status_message, color="#FFB000", font_weight="bold", font_size="14px"),
-                    rx.text(f"{BreakoutTimingState.total_count} ROWS", color="#00FF00", font_weight="bold", font_size="12px"),
+                    rx.text(BreakoutTimingDailyState.status_message, color="#FFB000", font_weight="bold", font_size="14px"),
+                    rx.text(f"{BreakoutTimingDailyState.total_count} ROWS", color="#00FF00", font_weight="bold", font_size="12px"),
+                    rx.text(
+                        f"LIVE_STRUCT {BreakoutTimingDailyState.live_struct_rows}",
+                        color="#00E5FF",
+                        font_weight="bold",
+                        font_size="12px",
+                    ),
+                    rx.text(
+                        f"RAW {BreakoutTimingDailyState.live_struct_rows_raw}",
+                        color="#4FD1C5",
+                        font_weight="bold",
+                        font_size="11px",
+                    ),
+                    rx.text(
+                        f"SYNC {BreakoutTimingDailyState.last_sync}",
+                        color="#B0BEC5",
+                        font_size="10px",
+                    ),
+                    spacing="2",
+                    align_items="center",
+                    flex_wrap="wrap",
+                    justify_content="flex-end",
+                    max_width="720px",
+                ),
+                rx.hstack(
+                    rx.text("EOD", color="#B0BEC5", font_size="11px", font_weight="bold"),
+                    rx.text(BreakoutTimingDailyState.eod_sync_status, color="#4FD1C5", font_size="11px", font_weight="bold"),
+                    rx.text(
+                        f"{BreakoutTimingDailyState.eod_fresh_count}/{BreakoutTimingDailyState.eod_total_count}",
+                        color="#00E5FF",
+                        font_size="11px",
+                    ),
+                    rx.text(
+                        f"{BreakoutTimingDailyState.eod_sync_pct:.1f}%",
+                        color="#00E5FF",
+                        font_size="11px",
+                    ),
+                    rx.text(
+                        f"EXP {BreakoutTimingDailyState.eod_expected_date}",
+                        color="#B0BEC5",
+                        font_size="11px",
+                    ),
+                    rx.text(
+                        f"STALE {BreakoutTimingDailyState.eod_stale_count}",
+                        color="#FFB74D",
+                        font_size="11px",
+                    ),
+                    rx.text(
+                        f"CHK {BreakoutTimingDailyState.eod_last_checked_ist}",
+                        color="#90A4AE",
+                        font_size="10px",
+                    ),
+                    spacing="2",
+                    align_items="center",
+                    flex_wrap="wrap",
+                    justify_content="flex-end",
+                    max_width="720px",
+                ),
+                align_items="end",
+                spacing="0",
+            ),
+            width="100%",
+            padding="10px",
+            border_bottom="1px solid #333333",
+            background_color="#000000",
+        ),
+        spacing="0",
+        width="100%",
+    )
+
+
+def breakout_timing_weekly_header():
+    return rx.vstack(
+        rx.hstack(
+            rx.vstack(
+                rx.text("SOLARIS • BREAKOUT CLOCK • WEEKLY", size="4", color="#00E5FF", font_weight="bold"),
+                rx.text(
+                    "Weekly structural tags (LAST TAG W, WHEN W) + tape; daily columns live on the Daily clock page.",
+                    size="1",
+                    color="#888888",
+                ),
+                align_items="start",
+                spacing="0",
+            ),
+            rx.spacer(),
+            rx.vstack(
+                rx.hstack(
+                    rx.link("← Breakout grid", href="/breakout", color="#FFB000", font_size="12px"),
+                    rx.link("Daily clock →", href="/breakout-clock-daily", color="#00E5FF", font_size="12px"),
+                    spacing="3",
+                ),
+                rx.text("ENGINE STATUS", size="1", color="#D1D1D1", font_weight="bold"),
+                rx.hstack(
+                    rx.text(BreakoutTimingWeeklyState.status_message, color="#FFB000", font_weight="bold", font_size="14px"),
+                    rx.text(f"{BreakoutTimingWeeklyState.total_count} ROWS", color="#00FF00", font_weight="bold", font_size="12px"),
                     spacing="2",
                     align_items="center",
                 ),
@@ -43,29 +170,15 @@ def breakout_timing_header():
     )
 
 
-def breakout_timing_sidebar():
-    profile_opts = ["ALL", "ELITE", "LEADER", "RISING", "LAGGARD", "FADING", "BASELINE"]
-    timing_opts = ["ALL", "LIVE", "SUSTAINED", "SUSTAINED_W", "NOT_SUSTAINED", "E_TIMING", "E_SUSTAINED", "ANY_BRK", "D_BRK", "W_BRK"]
-    brk_options = [
-        "ALL",
-        "LOCKED",
-        "TRENDING",
-        "PULLBACK",
-        "B",
-        "E9CT",
-        "ET9DNWF21C",
-        "E21C",
-        "RST",
-    ]
-    mrs_grid_options = ["ALL", "TREND_OK"]
-    wmrs_slope_options = ["ALL", "POS"]
+def breakout_timing_daily_sidebar():
+    timing_opts = ["ALL", "LIVE_STRUCT_ONLY", "LIVE", "SUSTAINED", "NOT_SUSTAINED", "E_TIMING", "E_SUSTAINED", "D_BRK"]
     return rx.vstack(
         rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
         rx.box(
             rx.select(
                 UNIVERSE_OPTIONS,
-                value=BreakoutTimingState.universe,
-                on_change=BreakoutTimingState.set_universe,
+                value=BreakoutTimingDailyState.universe,
+                on_change=BreakoutTimingDailyState.set_universe,
                 color="white",
                 bg="#111111",
                 border="1px solid #333333",
@@ -81,11 +194,11 @@ def breakout_timing_sidebar():
             width="100%",
         ),
         rx.box(height="8px"),
-        rx.text("TIMING FILTER", size="1", color="#D1D1D1", font_weight="bold", padding="8px 15px 4px 15px"),
+        rx.text("TIMING FILTER (DAILY)", size="1", color="#D1D1D1", font_weight="bold", padding="8px 15px 4px 15px"),
         rx.select(
             timing_opts,
-            value=BreakoutTimingState.timing_filter,
-            on_change=BreakoutTimingState.set_timing_filter,
+            value=BreakoutTimingDailyState.timing_filter,
+            on_change=BreakoutTimingDailyState.set_timing_filter,
             color="white",
             bg="#111111",
             border="1px solid #333333",
@@ -97,9 +210,8 @@ def breakout_timing_sidebar():
             height="32px",
         ),
         rx.text(
-            "LIVE = pending daily C* above brk. SUSTAINED = daily C*S today / live hold. "
-            "SUSTAINED_W = weekly C*S today / live weekly hold. "
-            "E_TIMING = E-family cycle/timing view. E_SUSTAINED = explicit CE*S tags.",
+            "LIVE_STRUCT_ONLY = non-empty LIVE_STRUCT_D. LIVE / SUSTAINED / NOT_SUSTAINED = daily breakout hold vs level. "
+            "E_TIMING / E_SUSTAINED = daily CE* family. D_BRK = daily B/CB.",
             size="1",
             color="#666666",
             padding="4px 15px 0 15px",
@@ -108,8 +220,8 @@ def breakout_timing_sidebar():
         rx.text("Symbol contains", size="1", color="#888888", padding_left="15px"),
         rx.input(
             placeholder="e.g. RELIANCE",
-            value=BreakoutTimingState.search_query,
-            on_change=BreakoutTimingState.set_search_query,
+            value=BreakoutTimingDailyState.search_query,
+            on_change=BreakoutTimingDailyState.set_search_query,
             size="1",
             width="100%",
             max_width="260px",
@@ -124,9 +236,9 @@ def breakout_timing_sidebar():
         ),
         rx.text("PROFILE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
         rx.select(
-            profile_opts,
-            value=BreakoutTimingState.filter_profile,
-            on_change=BreakoutTimingState.set_filter_profile,
+            _PROFILE_OPTS,
+            value=BreakoutTimingDailyState.filter_profile,
+            on_change=BreakoutTimingDailyState.set_filter_profile,
             color="white",
             bg="#111111",
             border="1px solid #333333",
@@ -146,11 +258,11 @@ def breakout_timing_sidebar():
             padding_right="15px",
             white_space="normal",
         ),
-        rx.text("BRK STAGE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.text("BRK STAGE (DAILY)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
         rx.select(
-            brk_options,
-            value=BreakoutTimingState.filter_brk_stage,
-            on_change=BreakoutTimingState.set_filter_brk_stage,
+            _BRK_OPTIONS,
+            value=BreakoutTimingDailyState.filter_brk_stage,
+            on_change=BreakoutTimingDailyState.set_filter_brk_stage,
             color="white",
             bg="#111111",
             border="1px solid #333333",
@@ -163,9 +275,9 @@ def breakout_timing_sidebar():
         ),
         rx.text("TREND FILTER", size="1", color="#888888", padding_top="8px", padding_left="15px"),
         rx.select(
-            mrs_grid_options,
-            value=BreakoutTimingState.filter_mrs_grid,
-            on_change=BreakoutTimingState.set_filter_mrs_grid,
+            _MRS_GRID,
+            value=BreakoutTimingDailyState.filter_mrs_grid,
+            on_change=BreakoutTimingDailyState.set_filter_mrs_grid,
             color="white",
             bg="#111111",
             border="1px solid #333333",
@@ -178,9 +290,9 @@ def breakout_timing_sidebar():
         ),
         rx.text("W_MRS SLOPE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
         rx.select(
-            wmrs_slope_options,
-            value=BreakoutTimingState.filter_wmrs_slope,
-            on_change=BreakoutTimingState.set_filter_wmrs_slope,
+            _WMRS_SLOPE,
+            value=BreakoutTimingDailyState.filter_wmrs_slope,
+            on_change=BreakoutTimingDailyState.set_filter_wmrs_slope,
             color="white",
             bg="#111111",
             border="1px solid #333333",
@@ -191,27 +303,11 @@ def breakout_timing_sidebar():
             margin_right="15px",
             height="32px",
         ),
-        rx.text("LAST TAG PREFIX", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.text("LAST TAG PREFIX (DAILY)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
         rx.select(
-            [
-                "ALL",
-                "B",
-                "E9CT",
-                "E9CT1",
-                "E9CT2",
-                "E9CT3",
-                "E9CT4",
-                "E9CT5",
-                "E9CT6",
-                "E9CT7",
-                "E9CT8",
-                "E9CT9",
-                "ET9DNWF21C",
-                "E21C",
-                "RST",
-            ],
-            value=BreakoutTimingState.filter_m_rsi2,
-            on_change=BreakoutTimingState.set_filter_m_rsi2,
+            _TAG_PREFIX_OPTS,
+            value=BreakoutTimingDailyState.filter_m_rsi2,
+            on_change=BreakoutTimingDailyState.set_filter_m_rsi2,
             color="white",
             bg="#111111",
             border="1px solid #333333",
@@ -224,7 +320,178 @@ def breakout_timing_sidebar():
         ),
         rx.button(
             "EXPORT XLSX",
-            on_click=BreakoutTimingState.download_excel,
+            on_click=BreakoutTimingDailyState.download_excel,
+            size="1",
+            margin_left="15px",
+            margin_right="15px",
+            margin_top="10px",
+            width="calc(100% - 30px)",
+            bg="#00E5FF",
+            color="black",
+            font_weight="bold",
+            _hover={"bg": "#00B8CC"},
+        ),
+        width="100%",
+        height="100%",
+        border_right="1px solid #333333",
+        background_color="#000000",
+        overflow_y="auto",
+        flex="1",
+        min_height="0",
+    )
+
+
+def breakout_timing_weekly_sidebar():
+    timing_opts = ["ALL", "SUSTAINED_W", "E_TIMING", "E_SUSTAINED", "W_BRK"]
+    return rx.vstack(
+        rx.text("TACTICAL / UNIVERSE", size="1", color="#D1D1D1", font_weight="bold", padding="10px 15px"),
+        rx.box(
+            rx.select(
+                UNIVERSE_OPTIONS,
+                value=BreakoutTimingWeeklyState.universe,
+                on_change=BreakoutTimingWeeklyState.set_universe,
+                color="white",
+                bg="#111111",
+                border="1px solid #333333",
+                size="1",
+                width="100%",
+                max_width="260px",
+                height="32px",
+                font_size="12px",
+                margin_left="15px",
+                margin_right="15px",
+                _focus={"border_color": "#00E5FF"},
+            ),
+            width="100%",
+        ),
+        rx.box(height="8px"),
+        rx.text("TIMING FILTER (WEEKLY)", size="1", color="#D1D1D1", font_weight="bold", padding="8px 15px 4px 15px"),
+        rx.select(
+            timing_opts,
+            value=BreakoutTimingWeeklyState.timing_filter,
+            on_change=BreakoutTimingWeeklyState.set_timing_filter,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
+        rx.text(
+            "SUSTAINED_W = weekly C*S / live weekly hold. E_TIMING / E_SUSTAINED = weekly CE* only. "
+            "W_BRK = weekly B/CB.",
+            size="1",
+            color="#666666",
+            padding="4px 15px 0 15px",
+        ),
+        rx.text("Same filters as Breakout grid", size="1", color="#888888", padding="10px 15px 4px 15px"),
+        rx.text("Symbol contains", size="1", color="#888888", padding_left="15px"),
+        rx.input(
+            placeholder="e.g. RELIANCE",
+            value=BreakoutTimingWeeklyState.search_query,
+            on_change=BreakoutTimingWeeklyState.set_search_query,
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            border="1px solid #333333",
+            bg="#111111",
+            color="white",
+            height="32px",
+            font_size="12px",
+            _focus={"border_color": "#00E5FF"},
+        ),
+        rx.text("PROFILE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.select(
+            _PROFILE_OPTS,
+            value=BreakoutTimingWeeklyState.filter_profile,
+            on_change=BreakoutTimingWeeklyState.set_filter_profile,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
+        rx.text(
+            "ELITE/LEADER: top RS leaders | RISING: improving trend | "
+            "LAGGARD: weak RS | FADING: losing momentum | BASELINE: neutral.",
+            size="1",
+            color="#777777",
+            padding_left="15px",
+            padding_right="15px",
+            white_space="normal",
+        ),
+        rx.text("BRK STAGE (WEEKLY)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.select(
+            _BRK_OPTIONS,
+            value=BreakoutTimingWeeklyState.filter_brk_stage,
+            on_change=BreakoutTimingWeeklyState.set_filter_brk_stage,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
+        rx.text("TREND FILTER", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.select(
+            _MRS_GRID,
+            value=BreakoutTimingWeeklyState.filter_mrs_grid,
+            on_change=BreakoutTimingWeeklyState.set_filter_mrs_grid,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
+        rx.text("W_MRS SLOPE", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.select(
+            _WMRS_SLOPE,
+            value=BreakoutTimingWeeklyState.filter_wmrs_slope,
+            on_change=BreakoutTimingWeeklyState.set_filter_wmrs_slope,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
+        rx.text("LAST TAG PREFIX (WEEKLY)", size="1", color="#888888", padding_top="8px", padding_left="15px"),
+        rx.select(
+            _TAG_PREFIX_OPTS,
+            value=BreakoutTimingWeeklyState.filter_m_rsi2,
+            on_change=BreakoutTimingWeeklyState.set_filter_m_rsi2,
+            color="white",
+            bg="#111111",
+            border="1px solid #333333",
+            size="1",
+            width="100%",
+            max_width="260px",
+            margin_left="15px",
+            margin_right="15px",
+            height="32px",
+        ),
+        rx.button(
+            "EXPORT XLSX",
+            on_click=BreakoutTimingWeeklyState.download_excel,
             size="1",
             margin_left="15px",
             margin_right="15px",

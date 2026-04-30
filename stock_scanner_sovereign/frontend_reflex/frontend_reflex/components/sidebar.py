@@ -48,7 +48,8 @@ def universe_panel():
             padding="4px 15px 8px 15px",
         ),
         rx.button("SIDECAR STRATEGY", on_click=State.open_sidecar_full_universe, variant="ghost", color="#FFB000", width="100%", text_align="left", justify_content="start", padding_x="15px", height="35px"),
-        rx.button("SIDECAR BREAKOUT CLOCK", on_click=State.open_breakout_timing_full_universe, variant="ghost", color="#00E5FF", width="100%", text_align="left", justify_content="start", padding_x="15px", height="35px"),
+        rx.button("SIDECAR BREAKOUT CLOCK (DAILY)", on_click=State.open_breakout_clock_daily_full_universe, variant="ghost", color="#00E5FF", width="100%", text_align="left", justify_content="start", padding_x="15px", height="35px"),
+        rx.button("SIDECAR BREAKOUT CLOCK (WEEKLY)", on_click=State.open_breakout_clock_weekly_full_universe, variant="ghost", color="#66CCFF", width="100%", text_align="left", justify_content="start", padding_x="15px", height="35px"),
         rx.button("SIDECAR INSIDER", on_click=lambda: rx.redirect("/insider", is_external=True), variant="ghost", color="#7CFC00", width="100%", text_align="left", justify_content="start", padding_x="15px", height="35px"),
         rx.button("SIDECAR EVENTS", on_click=lambda: rx.redirect("/events", is_external=True), variant="ghost", color="#00E5FF", width="100%", text_align="left", justify_content="start", padding_x="15px", height="35px"),
         width="100%", background_color="#000000", padding_bottom="10px"

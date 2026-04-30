@@ -30,14 +30,30 @@ class Settings:
     BREAKOUT_MRS_SIGNAL_PERIOD = int(os.getenv("BREAKOUT_MRS_SIGNAL_PERIOD", "30"))
     BREAKOUT_PIVOT_HIGH_WINDOW = int(os.getenv("BREAKOUT_PIVOT_HIGH_WINDOW", "10"))
     BREAKOUT_MIN_INTRADAY_BARS = int(os.getenv("BREAKOUT_MIN_INTRADAY_BARS", "100"))
-    # When last bar date == today, cycle logic normally uses the prior bar (avoids partial session).
-    # After this IST clock on Friday, use the last bar so Donchian / B* can show on the weekly close day
-    # without waiting until Monday. Set 0 to always defer same calendar day until the next session.
+    # NSE cash “EOD” wall clock (15:30 IST) reused for WHEN (D) display mapping and weekly stamps.
     CYCLE_SAME_DAY_BAR_FRIDAY_EOD_ENABLED = os.getenv(
         "CYCLE_SAME_DAY_BAR_FRIDAY_EOD_ENABLED", "1"
     ).strip().lower() in ("1", "true", "yes")
     CYCLE_SAME_DAY_BAR_FRIDAY_EOD_HOUR = int(os.getenv("CYCLE_SAME_DAY_BAR_FRIDAY_EOD_HOUR", "15"))
     CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE = int(os.getenv("CYCLE_SAME_DAY_BAR_FRIDAY_EOD_MINUTE", "30"))
+    # LAST TAG D / structural daily: when last parquet row is *today*, use it as the active bar after
+    # this IST time (Mon–Fri) so EOD-synced close updates same evening — not after midnight.
+    STRUCTURAL_SAMEDAY_AFTER_EOD_ENABLED = os.getenv(
+        "STRUCTURAL_SAMEDAY_AFTER_EOD_ENABLED", "1"
+    ).strip().lower() in ("1", "true", "yes")
+    STRUCTURAL_SAMEDAY_AFTER_EOD_IST_HOUR = int(os.getenv("STRUCTURAL_SAMEDAY_AFTER_EOD_IST_HOUR", "16"))
+    STRUCTURAL_SAMEDAY_AFTER_EOD_IST_MINUTE = int(os.getenv("STRUCTURAL_SAMEDAY_AFTER_EOD_IST_MINUTE", "15"))
+    # /breakout-timing daily clock: once per IST session day after this time, reload parquet into RingBuffers
+    # on the first get_ui_view so structural tags can follow EOD sync (independent of 180s backfill throttle).
+    BREAKOUT_TIMING_EOD_PARQUET_REFRESH_ENABLED = os.getenv(
+        "BREAKOUT_TIMING_EOD_PARQUET_REFRESH_ENABLED", "1"
+    ).strip().lower() in ("1", "true", "yes")
+    BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_HOUR = int(
+        os.getenv("BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_HOUR", "16")
+    )
+    BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_MINUTE = int(
+        os.getenv("BREAKOUT_TIMING_EOD_PARQUET_REFRESH_IST_MINUTE", "30")
+    )
 
     # Sidecar CPU: main breakout loop sleeps this long between full universe passes (default 0.5s was heavy on laptops).
     SIDECAR_LOOP_SLEEP_SEC = float(os.getenv("SIDECAR_LOOP_SLEEP_SEC", "0.5"))
